@@ -27,6 +27,8 @@ Edite o seed com um `SEED_USER_ID` que corresponda ao `sub` do usuário no Supab
 
 Swagger fica em `http://localhost:3000/docs`. Liveness e readiness ficam em `/health/live` e `/health/ready`.
 
+Contrato completo para clientes web: [`docs/frontend-integration.md`](docs/frontend-integration.md).
+
 ## Autenticação do frontend
 
 O frontend autentica diretamente no Supabase Auth. A API não recebe nem armazena a senha do usuário e não expõe rotas próprias de login, refresh ou logout.
