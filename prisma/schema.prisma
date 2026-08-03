@@ -1,0 +1,299 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum MemberRole {
+  owner
+  admin
+  member
+}
+enum RepositoryStatus {
+  pending
+  active
+  disabled
+  error
+}
+enum CredentialKind {
+  azure_devops_pat
+  codex_auth
+}
+enum JobSource {
+  manual
+  webhook
+  retry
+}
+enum JobStatus {
+  created
+  queued
+  running
+  retry_wait
+  completed
+  failed
+}
+enum AttemptStatus {
+  created
+  published
+  running
+  retry_wait
+  completed
+  failed
+  timed_out
+}
+enum PublicationKind {
+  finding
+  summary
+  status
+}
+enum PublicationStatus {
+  pending
+  publishing
+  completed
+  failed
+}
+enum MessageStatus {
+  pending
+  processing
+  processed
+  failed
+}
+
+model Organization {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String   @unique
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  members     OrganizationMember[]
+  repositories Repository[]
+  credentials IntegrationCredential[]
+  jobs        ReviewJob[]
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  organizationId String @db.Uuid @map("organization_id")
+  userId         String @db.Uuid @map("user_id")
+  role           MemberRole @default(member)
+  createdAt      DateTime @default(now()) @map("created_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@id([organizationId, userId])
+  @@index([userId])
+  @@map("organization_members")
+}
+
+model Repository {
+  id                  String @id @default(uuid()) @db.Uuid
+  organizationId      String @db.Uuid @map("organization_id")
+  name                String
+  provider            String @default("azure-devops")
+  azureOrganization   String @map("azure_organization")
+  azureProjectId      String @map("azure_project_id")
+  azureRepositoryId   String @map("azure_repository_id")
+  cloneUrl            String @map("clone_url")
+  status              RepositoryStatus @default(pending)
+  webhookSecretHash   String? @map("webhook_secret_hash")
+  webhookSecretVersion Int @default(0) @map("webhook_secret_version")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  credentials         IntegrationCredential[]
+  settings            ReviewSetting?
+  pullRequests        PullRequest[]
+  jobs                ReviewJob[]
+  webhookEvents       WebhookEvent[]
+  @@unique([organizationId, azureOrganization, azureProjectId, azureRepositoryId])
+  @@index([organizationId, status])
+  @@map("repositories")
+}
+
+model IntegrationCredential {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid @map("organization_id")
+  repositoryId   String? @db.Uuid @map("repository_id")
+  kind           CredentialKind
+  keyId          String @map("key_id")
+  iv             String
+  ciphertext     String
+  authTag        String @map("auth_tag")
+  version        Int @default(1)
+  lastValidatedAt DateTime? @map("last_validated_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repository     Repository? @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, repositoryId, kind])
+  @@index([organizationId, kind])
+  @@map("integration_credentials")
+}
+
+model ReviewSetting {
+  repositoryId     String @id @db.Uuid @map("repository_id")
+  prompt           String
+  severityThreshold String? @map("severity_threshold")
+  model            String
+  autoReview       Boolean @default(true) @map("auto_review")
+  policyVersion    String @default("static-review-v2") @map("policy_version")
+  maxAttempts      Int @default(3) @map("max_attempts")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  repository       Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  @@map("review_settings")
+}
+
+model PullRequest {
+  id                    String @id @default(uuid()) @db.Uuid
+  repositoryId          String @db.Uuid @map("repository_id")
+  providerPullRequestId String @map("provider_pull_request_id")
+  title                 String
+  status                String
+  sourceBranch          String @map("source_branch")
+  targetBranch          String @map("target_branch")
+  sourceCommit          String @map("source_commit")
+  targetCommit          String @map("target_commit")
+  raw                   Json?
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+  repository            Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  jobs                  ReviewJob[]
+  @@unique([repositoryId, providerPullRequestId])
+  @@map("pull_requests")
+}
+
+model ReviewJob {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid @map("organization_id")
+  repositoryId   String @db.Uuid @map("repository_id")
+  pullRequestId  String @db.Uuid @map("pull_request_id")
+  source         JobSource
+  status         JobStatus @default(created)
+  correlationId  String @unique @map("correlation_id")
+  currentAttempt Int @default(1) @map("current_attempt")
+  summary        Json?
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repository     Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  pullRequest    PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  attempts       ReviewJobAttempt[]
+  findings       ReviewFinding[]
+  publications   ReviewPublication[]
+  @@index([organizationId, createdAt])
+  @@index([repositoryId, status])
+  @@map("review_jobs")
+}
+
+model ReviewJobAttempt {
+  id             String @id @default(uuid()) @db.Uuid
+  reviewJobId    String @db.Uuid @map("review_job_id")
+  attempt        Int
+  eventId        String @unique @map("event_id")
+  status         AttemptStatus @default(created)
+  sandboxId      String? @map("sandbox_id")
+  deadlineAt     DateTime @map("deadline_at")
+  nextRetryAt    DateTime? @map("next_retry_at")
+  failureCode    String? @map("failure_code")
+  failureCategory String? @map("failure_category")
+  failureMessage String? @map("failure_message")
+  timings        Json?
+  startedAt      DateTime? @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  reviewJob      ReviewJob @relation(fields: [reviewJobId], references: [id], onDelete: Cascade)
+  findings       ReviewFinding[]
+  @@unique([reviewJobId, attempt])
+  @@index([status, nextRetryAt])
+  @@map("review_job_attempts")
+}
+
+model ReviewFinding {
+  id          String @id @default(uuid()) @db.Uuid
+  reviewJobId String @db.Uuid @map("review_job_id")
+  attemptId   String @db.Uuid @map("attempt_id")
+  ordinal     Int
+  filePath    String @map("file_path")
+  line        Int?
+  severity    String
+  category    String
+  title       String
+  description String
+  suggestion  String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  reviewJob   ReviewJob @relation(fields: [reviewJobId], references: [id], onDelete: Cascade)
+  attempt     ReviewJobAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  publications ReviewPublication[]
+  @@unique([attemptId, ordinal])
+  @@index([reviewJobId, severity])
+  @@map("review_findings")
+}
+
+model ReviewPublication {
+  id          String @id @default(uuid()) @db.Uuid
+  dedupKey    String @unique @map("dedup_key")
+  reviewJobId String @db.Uuid @map("review_job_id")
+  findingId   String? @db.Uuid @map("finding_id")
+  kind        PublicationKind
+  status      PublicationStatus @default(pending)
+  externalId  String? @map("external_id")
+  attempts    Int @default(0)
+  lastError   String? @map("last_error")
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  reviewJob   ReviewJob @relation(fields: [reviewJobId], references: [id], onDelete: Cascade)
+  finding     ReviewFinding? @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  @@unique([reviewJobId, findingId, kind])
+  @@index([status, updatedAt])
+  @@map("review_publications")
+}
+
+model WebhookEvent {
+  id              String @id @default(uuid()) @db.Uuid
+  repositoryId    String @db.Uuid @map("repository_id")
+  providerEventId String @map("provider_event_id")
+  eventType       String @map("event_type")
+  payload         Json
+  reviewJobId     String? @db.Uuid @map("review_job_id")
+  processingAt    DateTime? @map("processing_at")
+  processedAt     DateTime? @map("processed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  repository      Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  @@unique([repositoryId, providerEventId])
+  @@map("webhook_events")
+}
+
+model MessageInbox {
+  eventId      String @id @map("event_id")
+  routingKey   String @map("routing_key")
+  status       MessageStatus @default(processing)
+  payload      Json
+  error        String?
+  processedAt  DateTime? @map("processed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  @@map("message_inbox")
+}
+
+model MessageOutbox {
+  id            String @id @default(uuid()) @db.Uuid
+  eventId       String @unique @map("event_id")
+  aggregateId   String @db.Uuid @map("aggregate_id")
+  routingKey    String @map("routing_key")
+  payload       Json
+  status        MessageStatus @default(pending)
+  attempts      Int @default(0)
+  availableAt   DateTime @default(now()) @map("available_at")
+  publishedAt   DateTime? @map("published_at")
+  lastError     String? @map("last_error")
+  leaseUntil    DateTime? @map("lease_until")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  @@index([status, availableAt])
+  @@map("message_outbox")
+}
