@@ -27,6 +27,34 @@ Edite o seed com um `SEED_USER_ID` que corresponda ao `sub` do usuário no Supab
 
 Swagger fica em `http://localhost:3000/docs`. Liveness e readiness ficam em `/health/live` e `/health/ready`.
 
+## Autenticação do frontend
+
+O frontend autentica diretamente no Supabase Auth. A API não recebe nem armazena a senha do usuário e não expõe rotas próprias de login, refresh ou logout.
+
+Configure no frontend apenas valores públicos:
+
+```env
+SUPABASE_URL=https://project-ref.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+OCTOB_API_URL=https://api.example.com
+```
+
+Depois do login com o SDK do Supabase, envie o `access_token` em todas as chamadas protegidas:
+
+```http
+Authorization: Bearer <supabase-access-token>
+X-Organization-Id: <organization-uuid>
+```
+
+O header `X-Organization-Id` não é necessário em `GET /me` e `GET /organizations`. O fluxo recomendado é:
+
+1. Autenticar no Supabase com e-mail/senha, magic link ou OAuth.
+2. Consultar `GET /me` para validar a sessão na API.
+3. Consultar `GET /organizations` e selecionar uma organização.
+4. Enviar o UUID escolhido em `X-Organization-Id` nas demais rotas.
+
+As URLs do frontend devem ser cadastradas em **Authentication → URL Configuration** no Dashboard do Supabase. Senhas, tokens de sessão, chaves `service_role`, PATs e arquivos `auth.json` nunca devem ser adicionados ao repositório; provisione e rotacione esses valores fora do Git.
+
 ## Ordem de configuração
 
 1. Executar migrations e provisionar organização/membership com o seed.
