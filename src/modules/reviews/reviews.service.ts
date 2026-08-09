@@ -73,6 +73,7 @@ export class ReviewsService {
   async get(organizationId: string, id: string) { const job = await this.prisma.reviewJob.findFirst({ where: { id, organizationId }, include: { repository: { select: { id: true, name: true } }, pullRequest: true, attempts: { orderBy: { attempt: "desc" } } } }); if (!job) throw new NotFoundException("Review job not found"); return job; }
   async findings(organizationId: string, id: string) { await this.get(organizationId, id); return this.prisma.reviewFinding.findMany({ where: { reviewJobId: id }, orderBy: [{ severity: "desc" }, { ordinal: "asc" }] }); }
   async getSettings(organizationId: string, repositoryId: string) { await this.repositories.get(organizationId, repositoryId); return this.prisma.reviewSetting.findUniqueOrThrow({ where: { repositoryId } }); }
+  getAllowedModels() { return { models: this.config.getOrThrow<string[]>("review.allowedModels"), defaultModel: this.config.getOrThrow<string>("review.defaultModel") }; }
   async updateSettings(organizationId: string, repositoryId: string, dto: UpdateReviewSettingsDto) { await this.repositories.get(organizationId, repositoryId); this.assertModel(dto.model); return this.prisma.reviewSetting.update({ where: { repositoryId }, data: dto }); }
   loadRetryJob(jobId: string) { return this.prisma.reviewJob.findUnique({ where: { id: jobId }, include: { pullRequest: true, attempts: { orderBy: { attempt: "desc" }, take: 1 }, repository: { include: { settings: true } } } }); }
 
