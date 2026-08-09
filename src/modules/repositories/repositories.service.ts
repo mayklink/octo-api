@@ -71,6 +71,16 @@ export class RepositoriesService {
     return repository;
   }
 
+  /**
+   * Looks up a repository by id only, without an organizationId to scope by.
+   * Used by inbound webhook handling, where the caller is authenticated by a
+   * per-repository webhook secret (validated by the caller right after this
+   * lookup) rather than by an authenticated organization context.
+   */
+  findByIdWithSettings(id: string) {
+    return this.prisma.repository.findUnique({ where: { id }, include: { settings: true } });
+  }
+
   private webhookUrl(id: string, secret: string) { const url = new URL("/webhooks/azure-devops", this.config.getOrThrow<string>("app.publicUrl")); url.searchParams.set("repository", id); url.searchParams.set("token", secret); return url.toString(); }
 }
 

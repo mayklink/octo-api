@@ -76,6 +76,7 @@ export class ReviewsService {
   getAllowedModels() { return { models: this.config.getOrThrow<string[]>("review.allowedModels"), defaultModel: this.config.getOrThrow<string>("review.defaultModel") }; }
   async updateSettings(organizationId: string, repositoryId: string, dto: UpdateReviewSettingsDto) { await this.repositories.get(organizationId, repositoryId); this.assertModel(dto.model); return this.prisma.reviewSetting.update({ where: { repositoryId }, data: dto }); }
   loadRetryJob(jobId: string) { return this.prisma.reviewJob.findUnique({ where: { id: jobId }, include: { pullRequest: true, attempts: { orderBy: { attempt: "desc" }, take: 1 }, repository: { include: { settings: true } } } }); }
+  findByCorrelationId(correlationId: string) { return this.prisma.reviewJob.findUnique({ where: { correlationId } }); }
 
   private buildRequest(args: any): ReviewRequestedV2 {
     const createdAt = new Date(); const deadlineAt = new Date(createdAt.getTime() + this.config.getOrThrow<number>("review.timeoutMs"));

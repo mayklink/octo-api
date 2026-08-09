@@ -3,13 +3,14 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 import { createHash } from "node:crypto";
 import { CredentialsService } from "../credentials/credentials.service";
+import { RepositoriesService } from "../repositories/repositories.service";
 import { ReviewsService } from "../reviews/reviews.service";
 
 @Injectable()
 export class WebhooksService {
-  constructor(private readonly prisma: PrismaService, private readonly credentials: CredentialsService, private readonly reviews: ReviewsService) {}
+  constructor(private readonly prisma: PrismaService, private readonly credentials: CredentialsService, private readonly repositories: RepositoriesService, private readonly reviews: ReviewsService) {}
   async azureDevOps(repositoryId: string, token: string, body: unknown) {
-    const repository = await this.prisma.repository.findUnique({ where: { id: repositoryId }, include: { settings: true } });
+    const repository = await this.repositories.findByIdWithSettings(repositoryId);
     if (!repository) throw new NotFoundException("Webhook repository not found");
     if (!repository.webhookSecretHash || !this.credentials.matchesWebhookSecret(token, repository.webhookSecretHash)) throw new ForbiddenException("Invalid webhook token");
     const event = parseAzureEvent(body);
@@ -30,7 +31,7 @@ export class WebhooksService {
     }
     const correlationId = event.correlationId?.slice(0, 128) || `wh-${createHash("sha256").update(`${repositoryId}:${event.id}`).digest("hex")}`;
     try {
-      const existingJob = await this.prisma.reviewJob.findUnique({ where: { correlationId } });
+      const existingJob = await this.reviews.findByCorrelationId(correlationId);
       const job = existingJob ?? await this.reviews.create(repository.organizationId, { repositoryId, pullRequestId: event.pullRequestId }, correlationId, "webhook");
       await this.prisma.webhookEvent.update({ where: { id: stored.id }, data: { reviewJobId: job.id, processedAt: new Date(), processingAt: null } });
       return { accepted: true, jobId: job.id };

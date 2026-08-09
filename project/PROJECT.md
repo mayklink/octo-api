@@ -121,4 +121,4 @@ Ainda precisa ser documentado: registre restrições técnicas, regulatórias e 
 
 ## Decisões importantes
 
-Ainda precisa ser documentado: registre decisões que um agente não deve reverter sem discussão.
+- **`messaging` pode acessar diretamente os models de `reviews` sem passar pelos services públicos do módulo.** `OutboxDispatcherService` e `RuntimeReconcilerService` (`src/modules/messaging/*.ts`) leem/escrevem `ReviewJob`, `ReviewJobAttempt`, `ReviewPublication` e `MessageOutbox` via `PrismaService` diretamente. Isso é uma exceção deliberada à regra geral de "acesso a dados de outro domínio deve passar pelo service público do módulo dono": `messaging` é tratado como camada de infraestrutura (adaptador técnico do padrão outbox/inbox), não como módulo de domínio, então opera sobre as mesmas tabelas de controle de entrega de mensagens de `reviews` sem intermediário. Não estenda essa exceção a outros módulos (ex.: `webhooks`, `organizations`) sem decisão explícita — eles devem usar os services públicos (`RepositoriesService`, `ReviewsService` etc.).

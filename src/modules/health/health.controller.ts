@@ -1,11 +1,10 @@
-import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
-import { PrismaService } from "../../infrastructure/prisma/prisma.service";
+import { Controller, Get } from "@nestjs/common";
 import { Public } from "../auth/public.decorator";
-import { RabbitConnection } from "../messaging/rabbit.connection";
+import { HealthService } from "./health.service";
 
 @Controller("health")
 export class HealthController {
-  constructor(private readonly prisma: PrismaService, private readonly rabbit: RabbitConnection) {}
+  constructor(private readonly health: HealthService) {}
 
   @Public()
   @Get("live")
@@ -13,13 +12,5 @@ export class HealthController {
 
   @Public()
   @Get("ready")
-  async ready() {
-    try {
-      await this.prisma.$queryRaw`SELECT 1`;
-      if (!this.rabbit.isReady) throw new Error("RabbitMQ is not ready");
-      return { status: "ready", checks: { database: "up", rabbitmq: "up" } };
-    } catch (error) {
-      throw new ServiceUnavailableException(error instanceof Error ? error.message : "Dependency unavailable");
-    }
-  }
+  ready() { return this.health.checkReadiness(); }
 }
