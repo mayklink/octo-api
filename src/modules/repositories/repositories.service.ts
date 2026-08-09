@@ -4,7 +4,7 @@ import { CredentialKind, Prisma, RepositoryStatus } from "@prisma/client";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 import { AzureDevOpsAdapter } from "../azure-devops/azure-devops.adapter";
 import { CredentialsService } from "../credentials/credentials.service";
-import type { CreateRepositoryDto, UpdateRepositoryDto } from "./repositories.dto";
+import type { CreateRepositoryDto, DiscoverAzureRepositoriesDto, UpdateRepositoryDto } from "./repositories.dto";
 
 @Injectable()
 export class RepositoriesService {
@@ -30,6 +30,17 @@ export class RepositoriesService {
     const { secret, hash } = this.credentials.generateWebhookSecret();
     const updated = await this.prisma.repository.update({ where: { id }, data: { name: validated.name, cloneUrl: validated.cloneUrl, status: "active", webhookSecretHash: hash, webhookSecretVersion: { increment: 1 } }, select: publicRepositorySelect });
     return { ...updated, webhookUrl: this.webhookUrl(id, secret) };
+  }
+
+  discoverAzureRepositories(dto: DiscoverAzureRepositoriesDto) {
+    return this.azure.listRepositories(dto.azureOrganization, dto.pat);
+  }
+
+  async listPullRequests(organizationId: string, id: string) {
+    const repository = await this.get(organizationId, id);
+    if (repository.status !== RepositoryStatus.active) throw new ConflictException("Repository integration is not active");
+    const pat = (await this.credentials.load(organizationId, id, CredentialKind.azure_devops_pat)) as string;
+    return this.azure.listPullRequests(repository, pat);
   }
 
   async rotateWebhook(organizationId: string, id: string) {

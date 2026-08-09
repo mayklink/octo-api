@@ -13,3 +13,7 @@ export class UpdateRepositoryDto {
 }
 export class ConfigureAzureCredentialDto { @IsString() @MinLength(1) @MaxLength(512) pat!: string; }
 export class RepositoryIdDto { @IsUUID() repositoryId!: string; }
+export class DiscoverAzureRepositoriesDto {
+  @IsString() @MinLength(1) @MaxLength(160) azureOrganization!: string;
+  @IsString() @MinLength(1) @MaxLength(512) pat!: string;
+}

@@ -1,7 +1,7 @@
 import { BadGatewayException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { ReviewFinding } from "@prisma/client";
-import type { AzureContext, AzurePullRequest, AzureRepositoryConfig } from "./azure-devops.types";
+import type { AzureContext, AzureDiscoveredRepository, AzurePullRequest, AzureRepositoryConfig } from "./azure-devops.types";
 
 @Injectable()
 export class AzureDevOpsAdapter {
@@ -47,6 +47,38 @@ export class AzureDevOpsAdapter {
     return { pullRequest, workItems: workItems.value ?? [], threads: threads.value ?? [] };
   }
 
+  async listRepositories(organization: string, pat: string): Promise<AzureDiscoveredRepository[]> {
+    const projects = await this.requestOrg<{ value?: any[] }>(organization, pat, "/_apis/projects?$top=1000");
+    const projectList = (projects.value ?? []).filter((project) => isRecord(project) && typeof project.id === "string").slice(0, 200);
+    const repositoriesByProject = await Promise.all(projectList.map(async (project) => {
+      const repos = await this.requestOrg<{ value?: any[] }>(organization, pat, `/${encodeURIComponent(String(project.id))}/_apis/git/repositories`);
+      return (repos.value ?? []).flatMap((repo): AzureDiscoveredRepository[] => {
+        if (!isRecord(repo) || typeof repo.id !== "string" || typeof repo.remoteUrl !== "string") return [];
+        try {
+          return [{ projectId: String(project.id), projectName: String(project.name ?? project.id), repositoryId: String(repo.id), repositoryName: String(repo.name ?? repo.id), cloneUrl: sanitizeCloneUrl(String(repo.remoteUrl)) }];
+        } catch { return []; }
+      });
+    }));
+    return repositoriesByProject.flat();
+  }
+
+  async listPullRequests(config: AzureRepositoryConfig, pat: string): Promise<AzurePullRequest[]> {
+    const result = await this.request<{ value?: any[] }>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}/pullrequests?searchCriteria.status=active&$top=100`);
+    return (result.value ?? []).flatMap((value): AzurePullRequest[] => {
+      if (!isRecord(value) || value.pullRequestId === undefined) return [];
+      return [{
+        id: String(value.pullRequestId),
+        title: String(value.title ?? "Pull request"),
+        status: String(value.status ?? "unknown"),
+        sourceBranch: String(value.sourceRefName ?? ""),
+        targetBranch: String(value.targetRefName ?? ""),
+        sourceCommit: String(isRecord(value.lastMergeSourceCommit) ? value.lastMergeSourceCommit.commitId ?? "" : ""),
+        targetCommit: String(isRecord(value.lastMergeTargetCommit) ? value.lastMergeTargetCommit.commitId ?? "" : ""),
+        raw: value,
+      }];
+    });
+  }
+
   async publishFinding(config: AzureRepositoryConfig, pat: string, pullRequestId: string, finding: ReviewFinding): Promise<string> {
     const content = [`**${finding.severity.toUpperCase()}: ${finding.title}**`, finding.description, finding.suggestion ? `\nSugestão:\n${finding.suggestion}` : ""].filter(Boolean).join("\n\n");
     const body: Record<string, unknown> = { comments: [{ parentCommentId: 0, content, commentType: 1 }], status: 1 };
@@ -81,6 +113,19 @@ export class AzureDevOpsAdapter {
     let response: Response;
     try {
       response = await fetch(url, { method: options.method ?? "GET", headers: { authorization: `Basic ${Buffer.from(`:${pat}`).toString("base64")}`, accept: "application/json", ...(options.body ? { "content-type": "application/json" } : {}) }, body: options.body ? JSON.stringify(options.body) : undefined, signal: AbortSignal.timeout(15_000) });
+    } catch { throw new BadGatewayException("Azure DevOps is unavailable"); }
+    if (response.status === 401 || response.status === 403) throw new UnauthorizedException("Azure DevOps credential was rejected");
+    if (!response.ok) throw new BadGatewayException(`Azure DevOps request failed with status ${response.status}`);
+    return (response.status === 204 ? undefined : await response.json()) as T;
+  }
+
+  private async requestOrg<T>(organization: string, pat: string, path: string): Promise<T> {
+    const org = encodeURIComponent(organization);
+    const separator = path.includes("?") ? "&" : "?";
+    const url = `https://dev.azure.com/${org}${path}${separator}api-version=${encodeURIComponent(this.apiVersion)}`;
+    let response: Response;
+    try {
+      response = await fetch(url, { headers: { authorization: `Basic ${Buffer.from(`:${pat}`).toString("base64")}`, accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
     } catch { throw new BadGatewayException("Azure DevOps is unavailable"); }
     if (response.status === 401 || response.status === 403) throw new UnauthorizedException("Azure DevOps credential was rejected");
     if (!response.ok) throw new BadGatewayException(`Azure DevOps request failed with status ${response.status}`);
