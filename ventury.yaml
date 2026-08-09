@@ -1,0 +1,26 @@
+version: 1
+
+project:
+  context: project/PROJECT.md
+
+specifications:
+  directory: specs
+  filename: SPEC.md
+  required: true
+
+standards:
+  task: .ventury/standards/task.md
+  specification: .ventury/standards/specification.md
+  pull_request: .ventury/standards/pull-request.md
+  review: .ventury/standards/review.md
+
+workflow:
+  require_specification: true
+  require_plan_before_code: true
+  require_validation_before_completion: true
+
+commands:
+  install: "pnpm install --frozen-lockfile"
+  lint: "npm run lint"
+  build: "npm run build"
+  test: "npm test"
