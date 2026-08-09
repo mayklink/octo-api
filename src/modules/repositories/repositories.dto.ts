@@ -11,9 +11,9 @@ export class UpdateRepositoryDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(160) name?: string;
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
-export class ConfigureAzureCredentialDto { @IsString() @MinLength(1) @MaxLength(512) pat!: string; }
+export class ConfigureAzureCredentialDto { @IsOptional() @IsString() @MinLength(1) @MaxLength(512) pat?: string; }
 export class RepositoryIdDto { @IsUUID() repositoryId!: string; }
 export class DiscoverAzureRepositoriesDto {
-  @IsString() @MinLength(1) @MaxLength(160) azureOrganization!: string;
-  @IsString() @MinLength(1) @MaxLength(512) pat!: string;
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(160) azureOrganization?: string;
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(512) pat?: string;
 }

@@ -23,17 +23,32 @@ export class RepositoriesService {
     return this.prisma.repository.update({ where: { id }, data: { name: dto.name, status: dto.enabled === undefined ? undefined : dto.enabled ? RepositoryStatus.active : RepositoryStatus.disabled }, select: publicRepositorySelect });
   }
 
-  async configureAzure(organizationId: string, id: string, pat: string) {
+  async configureAzure(organizationId: string, id: string, pat?: string) {
     const repository = await this.get(organizationId, id);
-    const validated = await this.azure.validateConnection(repository, pat);
-    await this.credentials.store(organizationId, id, CredentialKind.azure_devops_pat, pat);
+    const effectivePat = pat ?? (await this.loadOrgConnection(organizationId))?.pat;
+    if (!effectivePat) throw new NotFoundException("No Personal Access Token was provided and no Azure DevOps connection is saved for this organization");
+    const validated = await this.azure.validateConnection(repository, effectivePat);
+    await this.credentials.store(organizationId, id, CredentialKind.azure_devops_pat, effectivePat);
     const { secret, hash } = this.credentials.generateWebhookSecret();
     const updated = await this.prisma.repository.update({ where: { id }, data: { name: validated.name, cloneUrl: validated.cloneUrl, status: "active", webhookSecretHash: hash, webhookSecretVersion: { increment: 1 } }, select: publicRepositorySelect });
     return { ...updated, webhookUrl: this.webhookUrl(id, secret) };
   }
 
-  discoverAzureRepositories(dto: DiscoverAzureRepositoriesDto) {
-    return this.azure.listRepositories(dto.azureOrganization, dto.pat);
+  async discoverAzureRepositories(organizationId: string, dto: DiscoverAzureRepositoriesDto) {
+    const connection = dto.azureOrganization && dto.pat ? { azureOrganization: dto.azureOrganization, pat: dto.pat } : await this.loadOrgConnection(organizationId);
+    if (!connection) throw new NotFoundException("Inform an Azure organization and PAT, or connect one for this organization first");
+    if (dto.azureOrganization && dto.pat) await this.credentials.store(organizationId, null, CredentialKind.azure_devops_pat, connection);
+    return this.azure.listRepositories(connection.azureOrganization, connection.pat);
+  }
+
+  async getAzureConnection(organizationId: string) {
+    const connection = await this.loadOrgConnection(organizationId);
+    return { connected: !!connection, azureOrganization: connection?.azureOrganization ?? null };
+  }
+
+  private async loadOrgConnection(organizationId: string): Promise<{ azureOrganization: string; pat: string } | null> {
+    try { return (await this.credentials.load(organizationId, null, CredentialKind.azure_devops_pat)) as { azureOrganization: string; pat: string }; }
+    catch (error) { if (error instanceof NotFoundException) return null; throw error; }
   }
 
   async listPullRequests(organizationId: string, id: string) {
