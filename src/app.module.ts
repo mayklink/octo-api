@@ -25,7 +25,7 @@ import { ContractsModule } from "./modules/contracts/contracts.module";
     LoggerModule.forRootAsync({ inject: [ConfigService], useFactory: (config: ConfigService) => ({
       pinoHttp: {
         level: config.get("app.logLevel", "info"),
-        redact: { paths: ["req.headers.authorization", "req.query.token", "*.password", "*.pat", "*.authJson", "*.ciphertext"], censor: "[REDACTED]" },
+        redact: { paths: ["req.headers.authorization", "req.query.token", "*.password", "*.pat", "*.authJson", "*.ciphertext", "*.serviceRoleKey", "*.SUPABASE_SERVICE_ROLE_KEY"], censor: "[REDACTED]" },
         serializers: {
           req: (req) => ({ ...req, url: redactWebhookToken(req.url) }),
         },

@@ -4,7 +4,7 @@ export default () => {
   const env = validateEnvironment(process.env);
   return {
     app: { environment: env.NODE_ENV, port: env.PORT, publicUrl: env.PUBLIC_API_URL, logLevel: env.LOG_LEVEL },
-    auth: { issuer: env.SUPABASE_JWT_ISSUER, audience: env.SUPABASE_JWT_AUDIENCE, jwksUrl: `${env.SUPABASE_URL}/auth/v1/.well-known/jwks.json` },
+    auth: { issuer: env.SUPABASE_JWT_ISSUER, audience: env.SUPABASE_JWT_AUDIENCE, jwksUrl: `${env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`, supabaseUrl: env.SUPABASE_URL, serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY },
     rabbit: { url: env.RABBITMQ_URL, exchange: env.RABBITMQ_EXCHANGE, inputQueue: env.RABBITMQ_INPUT_QUEUE, resultsQueue: env.RABBITMQ_RESULTS_QUEUE, dlx: env.RABBITMQ_DLX },
     secrets: { dataKey: env.OCTOB_DATA_ENCRYPTION_KEY, workerKey: env.OCTOB_CREDENTIAL_KEY_LOCAL },
     e2b: { apiKey: env.E2B_API_KEY, template: env.E2B_TEMPLATE_NAME },

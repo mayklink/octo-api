@@ -13,6 +13,12 @@ enum MemberRole {
   admin
   member
 }
+enum InviteStatus {
+  pending
+  accepted
+  expired
+  revoked
+}
 enum RepositoryStatus {
   pending
   active
@@ -70,6 +76,7 @@ model Organization {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   members     OrganizationMember[]
+  invites     OrganizationInvite[]
   repositories Repository[]
   credentials IntegrationCredential[]
   jobs        ReviewJob[]
@@ -79,12 +86,30 @@ model Organization {
 model OrganizationMember {
   organizationId String @db.Uuid @map("organization_id")
   userId         String @db.Uuid @map("user_id")
+  email          String
   role           MemberRole @default(member)
   createdAt      DateTime @default(now()) @map("created_at")
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   @@id([organizationId, userId])
   @@index([userId])
   @@map("organization_members")
+}
+
+model OrganizationInvite {
+  id              String       @id @default(uuid()) @db.Uuid
+  organizationId  String       @db.Uuid @map("organization_id")
+  email           String
+  role            MemberRole   @default(member)
+  status          InviteStatus @default(pending)
+  invitedByUserId String       @db.Uuid @map("invited_by_user_id")
+  expiresAt       DateTime     @map("expires_at")
+  acceptedAt      DateTime?    @map("accepted_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId, status, expiresAt])
+  @@index([email, status])
+  @@map("organization_invites")
 }
 
 model Repository {

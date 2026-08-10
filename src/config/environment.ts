@@ -10,6 +10,7 @@ const schema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_JWT_ISSUER: z.string().url(),
   SUPABASE_JWT_AUDIENCE: z.string().min(1).default("authenticated"),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   RABBITMQ_URL: z.string().min(1),
   RABBITMQ_EXCHANGE: z.string().min(1).default("octob.reviews"),
   RABBITMQ_INPUT_QUEUE: z.string().min(1).default("octob.review-worker.review.requested"),
