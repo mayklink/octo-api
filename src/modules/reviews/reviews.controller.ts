@@ -13,7 +13,7 @@ export class ReviewsController {
   @Post("review-jobs") @Roles("owner", "admin") create(@CurrentUser() auth: AuthContext, @Body() dto: CreateReviewJobDto) { return this.reviews.create(auth.organizationId!, dto, auth.correlationId); }
   @Post("review-jobs/:id/retry") @Roles("owner", "admin") retry(@CurrentUser() auth: AuthContext, @Param("id", ParseUUIDPipe) id: string) { return this.reviews.retry(auth.organizationId!, id); }
   @Get("review-jobs/:id/findings") findings(@CurrentUser() auth: AuthContext, @Param("id", ParseUUIDPipe) id: string) { return this.reviews.findings(auth.organizationId!, id); }
-  @Get("review-settings/allowed-models") allowedModels() { return this.reviews.getAllowedModels(); }
+  @Get("review-settings/allowed-models") allowedModels(@CurrentUser() auth: AuthContext) { return this.reviews.getAllowedModels(auth.organizationId!); }
   @Get("review-settings/:repositoryId") settings(@CurrentUser() auth: AuthContext, @Param("repositoryId", ParseUUIDPipe) id: string) { return this.reviews.getSettings(auth.organizationId!, id); }
   @Put("review-settings/:repositoryId") @Roles("owner", "admin") updateSettings(@CurrentUser() auth: AuthContext, @Param("repositoryId", ParseUUIDPipe) id: string, @Body() dto: UpdateReviewSettingsDto) { return this.reviews.updateSettings(auth.organizationId!, id, dto); }
 }

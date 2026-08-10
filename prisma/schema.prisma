@@ -73,6 +73,8 @@ model Organization {
   id          String   @id @default(uuid()) @db.Uuid
   name        String
   slug        String   @unique
+  allowedModels String[] @default([]) @map("allowed_models")
+  defaultModel  String?  @map("default_model")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   members     OrganizationMember[]

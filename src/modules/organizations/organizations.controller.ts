@@ -1,9 +1,9 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Put } from "@nestjs/common";
 import { CurrentUser } from "../auth/current-user.decorator";
 import type { AuthContext } from "../auth/auth-context";
 import { OrganizationOptional } from "../auth/public.decorator";
 import { Roles } from "../auth/roles.decorator";
-import { InviteMemberDto, UpdateMemberRoleDto } from "./organizations.dto";
+import { InviteMemberDto, UpdateMemberRoleDto, UpdateModelPolicyDto } from "./organizations.dto";
 import { OrganizationsService } from "./organizations.service";
 
 @Controller("organizations")
@@ -54,6 +54,20 @@ export class OrganizationsController {
   async removeMember(@CurrentUser() auth: AuthContext, @Param("organizationId", ParseUUIDPipe) organizationId: string, @Param("userId", ParseUUIDPipe) userId: string) {
     this.assertOrganization(auth, organizationId);
     return this.organizations.removeMember(organizationId, userId, auth.userId);
+  }
+
+  @Get(":organizationId/model-policy")
+  @Roles("owner", "admin")
+  async getModelPolicy(@CurrentUser() auth: AuthContext, @Param("organizationId", ParseUUIDPipe) organizationId: string) {
+    this.assertOrganization(auth, organizationId);
+    return this.organizations.resolveModelPolicy(organizationId);
+  }
+
+  @Put(":organizationId/model-policy")
+  @Roles("owner")
+  async updateModelPolicy(@CurrentUser() auth: AuthContext, @Param("organizationId", ParseUUIDPipe) organizationId: string, @Body() dto: UpdateModelPolicyDto) {
+    this.assertOrganization(auth, organizationId);
+    return this.organizations.updateModelPolicy(organizationId, dto);
   }
 
   private assertOrganization(auth: AuthContext, organizationId: string): void {

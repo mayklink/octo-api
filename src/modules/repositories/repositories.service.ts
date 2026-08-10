@@ -4,17 +4,19 @@ import { CredentialKind, Prisma, RepositoryStatus } from "@prisma/client";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 import { AzureDevOpsAdapter } from "../azure-devops/azure-devops.adapter";
 import { CredentialsService } from "../credentials/credentials.service";
+import { OrganizationsService } from "../organizations/organizations.service";
 import type { CreateRepositoryDto, DiscoverAzureRepositoriesDto, UpdateRepositoryDto } from "./repositories.dto";
 
 @Injectable()
 export class RepositoriesService {
-  constructor(private readonly prisma: PrismaService, private readonly credentials: CredentialsService, private readonly azure: AzureDevOpsAdapter, private readonly config: ConfigService) {}
+  constructor(private readonly prisma: PrismaService, private readonly credentials: CredentialsService, private readonly azure: AzureDevOpsAdapter, private readonly config: ConfigService, private readonly organizations: OrganizationsService) {}
 
   list(organizationId: string) { return this.prisma.repository.findMany({ where: { organizationId }, orderBy: { createdAt: "desc" }, select: publicRepositorySelect }); }
 
   async create(organizationId: string, dto: CreateRepositoryDto) {
+    const { defaultModel } = await this.organizations.resolveModelPolicy(organizationId);
     try {
-      return await this.prisma.repository.create({ data: { organizationId, ...dto, settings: { create: { prompt: defaultPrompt, model: this.config.getOrThrow("review.defaultModel") } } }, select: publicRepositorySelect });
+      return await this.prisma.repository.create({ data: { organizationId, ...dto, settings: { create: { prompt: defaultPrompt, model: defaultModel } } }, select: publicRepositorySelect });
     } catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException("Repository is already registered"); throw error; }
   }
 

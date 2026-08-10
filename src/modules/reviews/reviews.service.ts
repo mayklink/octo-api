@@ -8,12 +8,13 @@ import type { AzurePullRequest } from "../azure-devops/azure-devops.types";
 import { ContractsService } from "../contracts/contracts.service";
 import type { EncryptedCredential, ReviewRequestedV2 } from "../contracts/review-contracts";
 import { CredentialsService } from "../credentials/credentials.service";
+import { OrganizationsService } from "../organizations/organizations.service";
 import { RepositoriesService } from "../repositories/repositories.service";
 import type { CreateReviewJobDto, UpdateReviewSettingsDto } from "./reviews.dto";
 
 @Injectable()
 export class ReviewsService {
-  constructor(private readonly prisma: PrismaService, private readonly repositories: RepositoriesService, private readonly credentials: CredentialsService, private readonly azure: AzureDevOpsAdapter, private readonly contracts: ContractsService, private readonly config: ConfigService) {}
+  constructor(private readonly prisma: PrismaService, private readonly repositories: RepositoriesService, private readonly credentials: CredentialsService, private readonly azure: AzureDevOpsAdapter, private readonly contracts: ContractsService, private readonly config: ConfigService, private readonly organizations: OrganizationsService) {}
 
   async create(organizationId: string, dto: CreateReviewJobDto, correlationId: string, source: JobSource = "manual") {
     if (source === "manual") correlationId = randomUUID();
@@ -25,7 +26,7 @@ export class ReviewsService {
       this.prisma.reviewSetting.findUnique({ where: { repositoryId: repository.id } }),
     ]);
     if (!settings) throw new NotFoundException("Review settings not found");
-    this.assertModel(settings.model);
+    await this.assertModel(organizationId, settings.model);
     const [pullRequest, context] = await Promise.all([this.azure.getPullRequest(repository, pat, dto.pullRequestId), this.azure.getReviewContext(repository, pat, dto.pullRequestId)]);
     const jobId = randomUUID(); const eventId = randomUUID(); const attempt = 1;
     const request = this.buildRequest({ jobId, eventId, attempt, correlationId, organizationId, repository, pullRequest, context, settings, pat, authJson });
@@ -73,8 +74,8 @@ export class ReviewsService {
   async get(organizationId: string, id: string) { const job = await this.prisma.reviewJob.findFirst({ where: { id, organizationId }, include: { repository: { select: { id: true, name: true } }, pullRequest: true, attempts: { orderBy: { attempt: "desc" } } } }); if (!job) throw new NotFoundException("Review job not found"); return job; }
   async findings(organizationId: string, id: string) { await this.get(organizationId, id); return this.prisma.reviewFinding.findMany({ where: { reviewJobId: id }, orderBy: [{ severity: "desc" }, { ordinal: "asc" }] }); }
   async getSettings(organizationId: string, repositoryId: string) { await this.repositories.get(organizationId, repositoryId); return this.prisma.reviewSetting.findUniqueOrThrow({ where: { repositoryId } }); }
-  getAllowedModels() { return { models: this.config.getOrThrow<string[]>("review.allowedModels"), defaultModel: this.config.getOrThrow<string>("review.defaultModel") }; }
-  async updateSettings(organizationId: string, repositoryId: string, dto: UpdateReviewSettingsDto) { await this.repositories.get(organizationId, repositoryId); this.assertModel(dto.model); return this.prisma.reviewSetting.update({ where: { repositoryId }, data: dto }); }
+  async getAllowedModels(organizationId: string) { const { allowedModels, defaultModel } = await this.organizations.resolveModelPolicy(organizationId); return { models: allowedModels, defaultModel }; }
+  async updateSettings(organizationId: string, repositoryId: string, dto: UpdateReviewSettingsDto) { await this.repositories.get(organizationId, repositoryId); await this.assertModel(organizationId, dto.model); return this.prisma.reviewSetting.update({ where: { repositoryId }, data: dto }); }
   loadRetryJob(jobId: string) { return this.prisma.reviewJob.findUnique({ where: { id: jobId }, include: { pullRequest: true, attempts: { orderBy: { attempt: "desc" }, take: 1 }, repository: { include: { settings: true } } } }); }
   findByCorrelationId(correlationId: string) { return this.prisma.reviewJob.findUnique({ where: { correlationId } }); }
 
@@ -86,7 +87,7 @@ export class ReviewsService {
     request.engine.encryptedCredential = this.credentials.createWorkerEnvelope(request, "engine", args.authJson);
     return request;
   }
-  private assertModel(model: string) { if (!this.config.getOrThrow<string[]>("review.allowedModels").includes(model)) throw new BadRequestException("Review model is not allowed"); }
+  private async assertModel(organizationId: string, model: string) { const { allowedModels } = await this.organizations.resolveModelPolicy(organizationId); if (!allowedModels.includes(model)) throw new BadRequestException("Review model is not allowed"); }
 }
 
 function buildContextSections(context: { pullRequest: unknown; workItems: unknown[]; threads: unknown[] }): ReviewRequestedV2["context"]["sections"] {

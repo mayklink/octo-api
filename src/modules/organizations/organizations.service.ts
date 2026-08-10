@@ -1,14 +1,44 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
-import { InviteStatus, MemberRole } from "@prisma/client";
+import { ConfigService } from "@nestjs/config";
+import { InviteStatus, MemberRole, Prisma } from "@prisma/client";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 import { SupabaseAdminService } from "../auth/supabase-admin.service";
-import type { ManageableMemberRole } from "./organizations.dto";
+import type { ManageableMemberRole, UpdateModelPolicyDto } from "./organizations.dto";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+export interface ModelPolicy {
+  allowedModels: string[];
+  defaultModel: string;
+}
+
 @Injectable()
 export class OrganizationsService {
-  constructor(private readonly prisma: PrismaService, @Optional() private readonly supabaseAdmin?: SupabaseAdminService) {}
+  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService, @Optional() private readonly supabaseAdmin?: SupabaseAdminService) {}
+
+  /**
+   * Effective review-model policy for an organization: its own `allowedModels`/
+   * `defaultModel` when configured, otherwise the global fallback from
+   * `review.allowedModels`/`review.defaultModel` (env vars).
+   */
+  async resolveModelPolicy(organizationId: string): Promise<ModelPolicy> {
+    const organization = await this.prisma.organization.findUnique({ where: { id: organizationId }, select: { allowedModels: true, defaultModel: true } });
+    if (!organization) throw new NotFoundException("Organization not found");
+    const allowedModels = organization.allowedModels.length ? organization.allowedModels : this.config.getOrThrow<string[]>("review.allowedModels");
+    const defaultModel = organization.defaultModel ?? this.config.getOrThrow<string>("review.defaultModel");
+    return { allowedModels, defaultModel };
+  }
+
+  async updateModelPolicy(organizationId: string, dto: UpdateModelPolicyDto): Promise<ModelPolicy> {
+    if (!dto.allowedModels.includes(dto.defaultModel)) throw new BadRequestException("defaultModel must be included in allowedModels");
+    try {
+      const organization = await this.prisma.organization.update({ where: { id: organizationId }, data: { allowedModels: dto.allowedModels, defaultModel: dto.defaultModel }, select: { allowedModels: true, defaultModel: true } });
+      return { allowedModels: organization.allowedModels, defaultModel: organization.defaultModel! };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") throw new NotFoundException("Organization not found");
+      throw error;
+    }
+  }
 
   async listForUser(userId: string) {
     const memberships = await this.prisma.organizationMember.findMany({ where: { userId }, include: { organization: true }, orderBy: { createdAt: "asc" } });
