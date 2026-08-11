@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { CODEX_MODEL_VALUES } from "../modules/reviews/model-catalog";
 
 const positiveInt = z.coerce.number().int().positive();
 const schema = z.object({
@@ -39,9 +38,6 @@ export function validateEnvironment(value: Record<string, unknown>): Environment
     if (Buffer.from(result.data[name], "base64").length !== 32) throw new Error(`${name} must contain exactly 32 Base64-encoded bytes`);
   }
   const allowedModels = result.data.ALLOWED_CODEX_MODELS.split(",").map((v) => v.trim());
-  if (allowedModels.some((model) => !CODEX_MODEL_VALUES.includes(model as (typeof CODEX_MODEL_VALUES)[number]))) {
-    throw new Error("ALLOWED_CODEX_MODELS contains an unsupported Codex model option");
-  }
   if (!allowedModels.includes(result.data.DEFAULT_CODEX_MODEL)) {
     throw new Error("DEFAULT_CODEX_MODEL must be included in ALLOWED_CODEX_MODELS");
   }
