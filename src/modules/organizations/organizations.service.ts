@@ -4,6 +4,7 @@ import { InviteStatus, MemberRole, Prisma } from "@prisma/client";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 import { SupabaseAdminService } from "../auth/supabase-admin.service";
 import type { ManageableMemberRole, UpdateModelPolicyDto } from "./organizations.dto";
+import { CODEX_MODEL_VALUES } from "../reviews/model-catalog";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -30,6 +31,9 @@ export class OrganizationsService {
   }
 
   async updateModelPolicy(organizationId: string, dto: UpdateModelPolicyDto): Promise<ModelPolicy> {
+    if (dto.allowedModels.some((model) => !CODEX_MODEL_VALUES.includes(model as (typeof CODEX_MODEL_VALUES)[number]))) {
+      throw new BadRequestException("allowedModels contains an unsupported Codex model option");
+    }
     if (!dto.allowedModels.includes(dto.defaultModel)) throw new BadRequestException("defaultModel must be included in allowedModels");
     try {
       const organization = await this.prisma.organization.update({ where: { id: organizationId }, data: { allowedModels: dto.allowedModels, defaultModel: dto.defaultModel }, select: { allowedModels: true, defaultModel: true } });

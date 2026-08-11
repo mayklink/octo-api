@@ -140,11 +140,11 @@ describe("OrganizationsService", () => {
   });
 
   it("updates the organization's model policy when defaultModel is in allowedModels", async () => {
-    const prisma = { organization: { update: vi.fn().mockResolvedValue({ allowedModels: ["a", "b"], defaultModel: "b" }) } };
+    const prisma = { organization: { update: vi.fn().mockResolvedValue({ allowedModels: ["gpt-5.6-sol-high", "gpt-5.6-sol-medium"], defaultModel: "gpt-5.6-sol-medium" }) } };
     const service = new OrganizationsService(prisma as any, {} as any);
 
-    await expect(service.updateModelPolicy("org-1", { allowedModels: ["a", "b"], defaultModel: "b" })).resolves.toEqual({ allowedModels: ["a", "b"], defaultModel: "b" });
-    expect(prisma.organization.update).toHaveBeenCalledWith({ where: { id: "org-1" }, data: { allowedModels: ["a", "b"], defaultModel: "b" }, select: { allowedModels: true, defaultModel: true } });
+    await expect(service.updateModelPolicy("org-1", { allowedModels: ["gpt-5.6-sol-high", "gpt-5.6-sol-medium"], defaultModel: "gpt-5.6-sol-medium" })).resolves.toEqual({ allowedModels: ["gpt-5.6-sol-high", "gpt-5.6-sol-medium"], defaultModel: "gpt-5.6-sol-medium" });
+    expect(prisma.organization.update).toHaveBeenCalledWith({ where: { id: "org-1" }, data: { allowedModels: ["gpt-5.6-sol-high", "gpt-5.6-sol-medium"], defaultModel: "gpt-5.6-sol-medium" }, select: { allowedModels: true, defaultModel: true } });
   });
 
   it("rejects updating the model policy when defaultModel is not in allowedModels", async () => {
