@@ -1,6 +1,6 @@
 # octo-api
 
-API NestJS responsável por persistência, autenticação, Azure DevOps, orquestração E2B e integração RabbitMQ do Octob. O `llm-worker` permanece sem estado e não publica conteúdo no Azure DevOps.
+API NestJS responsável por persistência, autenticação, Azure DevOps e integração RabbitMQ do Octob. O `llm-worker` permanece sem estado e não publica conteúdo no Azure DevOps.
 
 ## Requisitos
 
@@ -9,7 +9,6 @@ API NestJS responsável por persistência, autenticação, Azure DevOps, orquest
 - PostgreSQL 15+
 - RabbitMQ 4 com suporte a quorum queues
 - Projeto Supabase Auth usando signing key assimétrica
-- Template E2B `octob-review-worker` já publicado
 
 ## Desenvolvimento
 
@@ -88,7 +87,7 @@ O token do webhook aparece na URL somente durante criação/rotação. A aplica�
 
 ## Processamento
 
-Criação de review persiste job, tentativa e outbox na mesma transação. O dispatcher publica `review.requested.v2` com publisher confirm e `mandatory`, e somente depois inicia o sandbox E2B. Resultados são validados com AJV e deduplicados por `eventId` na inbox.
+Criação de review persiste job, tentativa e outbox na mesma transação. O dispatcher publica `review.requested.v2` com publisher confirm e `mandatory`; o `llm-worker` permanente consome a fila e publica os resultados. Resultados são validados com AJV e deduplicados por `eventId` na inbox.
 
 `review.attempt_failed` agenda backoff persistido; `review.failed` é terminal. `review.completed` persiste findings e cria publicações idempotentes. Um scheduler publica threads e status no Azure DevOps, mantendo falha de publicação separada do resultado técnico do review.
 

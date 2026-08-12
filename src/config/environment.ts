@@ -18,8 +18,6 @@ const schema = z.object({
   RABBITMQ_DLX: z.string().min(1).default("octob.reviews.dlx"),
   OCTOB_DATA_ENCRYPTION_KEY: z.string().min(1),
   OCTOB_CREDENTIAL_KEY_LOCAL: z.string().min(1),
-  E2B_API_KEY: z.string().min(1),
-  E2B_TEMPLATE_NAME: z.string().min(1).default("octob-review-worker"),
   ALLOWED_CODEX_MODELS: z.string().min(1),
   DEFAULT_CODEX_MODEL: z.string().min(1),
   MAX_MESSAGE_BYTES: positiveInt.default(262144),

@@ -3,13 +3,12 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 import { PinoLogger } from "nestjs-pino";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 import type { ReviewRequestedV2 } from "../contracts/review-contracts";
-import { E2bRuntimeService } from "./e2b-runtime.service";
 import { RabbitConnection } from "./rabbit.connection";
 
 @Injectable()
 export class OutboxDispatcherService {
   private running = false;
-  constructor(private readonly prisma: PrismaService, private readonly rabbit: RabbitConnection, private readonly runtime: E2bRuntimeService, private readonly logger: PinoLogger) { logger.setContext(OutboxDispatcherService.name); }
+  constructor(private readonly prisma: PrismaService, private readonly rabbit: RabbitConnection, private readonly logger: PinoLogger) { logger.setContext(OutboxDispatcherService.name); }
   @Cron(CronExpression.EVERY_SECOND)
   async dispatch(): Promise<void> {
     if (this.running || !this.rabbit.isReady) return; this.running = true;
@@ -35,16 +34,9 @@ export class OutboxDispatcherService {
         this.prisma.reviewJobAttempt.update({ where: { eventId: event.eventId }, data: { status: "published" } }),
         this.prisma.reviewJob.update({ where: { id: event.jobId }, data: { status: "queued" } }),
     ]);
-    await this.startRuntime(event).catch((error) => this.logger.error({ err: error, eventId: event.eventId }, "Review request was published but E2B runtime did not start; reconciler will retry"));
-  }
-  async startRuntime(event: ReviewRequestedV2): Promise<void> {
-    const attempt = await this.prisma.reviewJobAttempt.findUnique({ where: { eventId: event.eventId } });
-    if (!attempt || attempt.sandboxId || attempt.status !== "published") return;
-    const claimed = await this.prisma.reviewJobAttempt.updateMany({ where: { id: attempt.id, status: "published", sandboxId: null, OR: [{ startedAt: null }, { startedAt: { lt: new Date(Date.now() - 2 * 60_000) } }] }, data: { startedAt: new Date() } });
-    if (!claimed.count) return;
-    const sandboxId = await this.runtime.start({ eventId: event.eventId, jobId: event.jobId, correlationId: event.correlationId });
-    const updated = await this.prisma.reviewJobAttempt.updateMany({ where: { id: attempt.id, status: "published" }, data: { sandboxId, status: "running" } });
-    if (!updated.count) { await this.runtime.stop(sandboxId); return; }
-    await this.prisma.reviewJob.updateMany({ where: { id: event.jobId, status: "queued" }, data: { status: "running" } });
+    await this.prisma.$transaction([
+      this.prisma.reviewJobAttempt.update({ where: { eventId: event.eventId }, data: { status: "running", startedAt: new Date() } }),
+      this.prisma.reviewJob.update({ where: { id: event.jobId }, data: { status: "running" } }),
+    ]);
   }
 }

@@ -5,14 +5,13 @@ import type { Channel, ChannelModel, ConfirmChannel, ConsumeMessage, Options } f
 import { PinoLogger } from "nestjs-pino";
 import { ContractsService } from "../contracts/contracts.service";
 import { ResultProcessorService } from "../reviews/result-processor.service";
-import { E2bRuntimeService } from "./e2b-runtime.service";
 
 @Injectable()
 export class RabbitConnection implements OnModuleInit, OnModuleDestroy {
   private connection?: ChannelModel; private consumer?: Channel; private publisher?: ConfirmChannel; private shuttingDown = false;
   private readonly returned = new Set<string>();
   isReady = false;
-  constructor(private readonly config: ConfigService, private readonly contracts: ContractsService, private readonly results: ResultProcessorService, private readonly runtime: E2bRuntimeService, private readonly logger: PinoLogger) { logger.setContext(RabbitConnection.name); }
+  constructor(private readonly config: ConfigService, private readonly contracts: ContractsService, private readonly results: ResultProcessorService, private readonly logger: PinoLogger) { logger.setContext(RabbitConnection.name); }
   async onModuleInit(): Promise<void> {
     try { await this.connect(); }
     catch (error) { this.logger.error({ err: error }, "Initial RabbitMQ connection failed"); setTimeout(() => void this.reconnect(), 5_000); }
@@ -59,9 +58,8 @@ export class RabbitConnection implements OnModuleInit, OnModuleDestroy {
       if (message.properties.headers?.schemaVersion !== 2 || message.properties.headers?.attempt !== event.attempt) throw new Error("AMQP outcome headers do not match payload");
       if (message.properties.messageId && message.properties.messageId !== event.eventId) throw new Error("AMQP messageId does not match eventId");
       if (message.properties.correlationId && message.properties.correlationId !== event.correlationId) throw new Error("AMQP correlationId does not match payload");
-      const result = await this.results.process(routingKey, event);
+      await this.results.process(routingKey, event);
       this.consumer!.ack(message);
-      await this.runtime.stop(result.sandboxId);
     } catch (error) {
       const redelivered = message.fields.redelivered;
       this.logger.error({ err: error, routingKey, redelivered }, "Review result processing failed");

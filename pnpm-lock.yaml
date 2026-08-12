@@ -44,9 +44,6 @@ importers:
       class-validator:
         specifier: ^0.14.2
         version: 0.14.4
-      e2b:
-        specifier: ^2.8.2
-        version: 2.37.0
       jose:
         specifier: ^5.10.0
         version: 5.10.0
