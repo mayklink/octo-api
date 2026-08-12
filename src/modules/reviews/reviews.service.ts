@@ -54,15 +54,26 @@ export class ReviewsService {
     const attempt = job.currentAttempt + 1;
     if (attempt > maxAttempts) throw new BadRequestException("Maximum review attempts reached");
     const previousAttemptId = job.attempts[0]?.id;
-    const [pat, authJson, context] = await Promise.all([
-      this.credentials.load(job.organizationId, job.repositoryId, CredentialKind.azure_devops_pat) as Promise<string>,
-      this.credentials.load(job.organizationId, null, CredentialKind.codex_auth),
-      this.azure.getReviewContext(job.repository, await this.credentials.load(job.organizationId, job.repositoryId, CredentialKind.azure_devops_pat) as string, job.pullRequest.providerPullRequestId),
-    ]);
-    const eventId = randomUUID();
-    const pullRequest: AzurePullRequest = { id: job.pullRequest.providerPullRequestId, title: job.pullRequest.title, status: job.pullRequest.status, sourceBranch: job.pullRequest.sourceBranch, targetBranch: job.pullRequest.targetBranch, sourceCommit: job.pullRequest.sourceCommit, targetCommit: job.pullRequest.targetCommit, raw: (job.pullRequest.raw ?? {}) as Record<string, unknown> };
-    const request = this.buildRequest({ jobId: job.id, eventId, attempt, correlationId: job.correlationId, organizationId: job.organizationId, repository: job.repository, pullRequest, context, settings: job.repository.settings, pat, authJson });
-    this.contracts.assertRequest(request);
+    let eventId: string;
+    let request: ReviewRequestedV2;
+    try {
+      const [pat, authJson, context] = await Promise.all([
+        this.credentials.load(job.organizationId, job.repositoryId, CredentialKind.azure_devops_pat) as Promise<string>,
+        this.credentials.load(job.organizationId, null, CredentialKind.codex_auth),
+        this.azure.getReviewContext(job.repository, await this.credentials.load(job.organizationId, job.repositoryId, CredentialKind.azure_devops_pat) as string, job.pullRequest.providerPullRequestId),
+      ]);
+      eventId = randomUUID();
+      const pullRequest: AzurePullRequest = { id: job.pullRequest.providerPullRequestId, title: job.pullRequest.title, status: job.pullRequest.status, sourceBranch: job.pullRequest.sourceBranch, targetBranch: job.pullRequest.targetBranch, sourceCommit: job.pullRequest.sourceCommit, targetCommit: job.pullRequest.targetCommit, raw: (job.pullRequest.raw ?? {}) as Record<string, unknown> };
+      request = this.buildRequest({ jobId: job.id, eventId, attempt, correlationId: job.correlationId, organizationId: job.organizationId, repository: job.repository, pullRequest, context, settings: job.repository.settings, pat, authJson });
+      this.contracts.assertRequest(request);
+    } catch (error) {
+      // Preparing the retry (loading credentials, fetching Azure DevOps context, etc.) failed.
+      // Without this, the job stays in "retry_wait" with a stale nextRetryAt, so the
+      // RetryScheduler cron (every 10s) would keep re-attempting forever without ever
+      // reaching the transaction below that increments currentAttempt/checks maxAttempts.
+      await this.failRetry(job.id, previousAttemptId, error);
+      throw error;
+    }
     await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.reviewJob.updateMany({
         where: { id: job.id, currentAttempt: job.currentAttempt, status: { in: ["retry_wait", "failed", "completed"] } },
@@ -97,6 +108,17 @@ export class ReviewsService {
     return request;
   }
   private async assertModel(organizationId: string, model: string) { const { allowedModels } = await this.organizations.resolveModelPolicy(organizationId); if (!allowedModels.includes(model)) throw new BadRequestException("Review model is not allowed"); }
+
+  private async failRetry(jobId: string, attemptId: string | undefined, error: unknown): Promise<void> {
+    const failureMessage = error instanceof Error ? error.message : String(error);
+    await this.prisma.$transaction(async (tx) => {
+      if (attemptId) {
+        await tx.reviewJobAttempt.updateMany({ where: { id: attemptId, status: "retry_wait" }, data: { status: "failed", nextRetryAt: null, failureCategory: "retry_preparation_failed", failureMessage, completedAt: new Date() } });
+      }
+      await tx.reviewJob.updateMany({ where: { id: jobId, status: "retry_wait" }, data: { status: "failed", completedAt: new Date() } });
+      await tx.reviewPublication.upsert({ where: { dedupKey: `${jobId}:status` }, update: { status: "pending", lastError: null }, create: { dedupKey: `${jobId}:status`, reviewJobId: jobId, kind: "status" } });
+    });
+  }
 }
 
 function buildContextSections(context: { pullRequest: unknown; workItems: unknown[]; threads: unknown[] }): ReviewRequestedV2["context"]["sections"] {
