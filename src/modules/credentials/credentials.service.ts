@@ -3,7 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { CredentialKind, type IntegrationCredential } from "@prisma/client";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
-import type { EncryptedCredential, ReviewRequestedV2 } from "../contracts/review-contracts";
+import type { EncryptedCredential, ReviewOutcomeV2, ReviewRequestedV2 } from "../contracts/review-contracts";
 
 type StoredValue = { value: unknown };
 
@@ -44,6 +44,34 @@ export class CredentialsService {
     return this.decryptAtRest(credential, organizationId, repositoryId).value;
   }
 
+  async persistCodexRefresh(event: ReviewOutcomeV2): Promise<boolean> {
+    const refresh = event.credentialRefresh;
+    if (!refresh) return false;
+    if (!event.organizationId || !event.repositoryId) throw new BadRequestException("Credential refresh is missing review identity");
+    const organizationId = event.organizationId;
+    const key = this.loadWorkerKey(refresh.keyId);
+    let payload: { previousRefreshToken: string; authJson: unknown };
+    try {
+      const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(refresh.iv, "base64"));
+      decipher.setAAD(Buffer.from(["octob.review.v2", "engine-refresh", event.causationId, event.jobId, event.organizationId, event.repositoryId, "azure-devops", refresh.keyId].join("\0"), "utf8"));
+      decipher.setAuthTag(Buffer.from(refresh.authTag, "base64"));
+      payload = JSON.parse(Buffer.concat([decipher.update(Buffer.from(refresh.ciphertext, "base64")), decipher.final()]).toString("utf8")) as typeof payload;
+    } catch (error) {
+      throw new BadRequestException("Invalid Codex credential refresh envelope", { cause: error as Error });
+    } finally { key.fill(0); }
+    if (!payload || typeof payload.previousRefreshToken !== "string") throw new BadRequestException("Invalid Codex credential refresh payload");
+    const next = this.validateCodexAuth(payload.authJson);
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.integrationCredential.findFirst({ where: { organizationId, repositoryId: null, kind: CredentialKind.codex_auth } });
+      if (!current) return false;
+      const currentValue = this.decryptAtRest(current, organizationId, null).value;
+      if (!isRecord(currentValue) || !isRecord(currentValue.tokens) || currentValue.tokens.refresh_token !== payload.previousRefreshToken) return false;
+      const envelope = this.encryptAtRest({ value: next }, organizationId, null, CredentialKind.codex_auth);
+      await tx.integrationCredential.update({ where: { id: current.id }, data: { ...envelope, version: { increment: 1 }, lastValidatedAt: new Date() } });
+      return true;
+    });
+  }
+
   createWorkerEnvelope(request: Pick<ReviewRequestedV2, "eventId" | "jobId" | "organizationId" | "repositoryId" | "provider" | "clone" | "engine">, purpose: "source-control" | "engine", plaintext: unknown): EncryptedCredential {
     const keyId = "local";
     const aad = ["octob.review.v2", purpose, request.eventId, request.jobId, request.organizationId, request.repositoryId, request.provider, request.clone.url, request.engine.kind, request.engine.model, keyId].join("\0");
@@ -81,6 +109,11 @@ export class CredentialsService {
     decipher.setAuthTag(Buffer.from(credential.authTag, "base64"));
     const clear = Buffer.concat([decipher.update(Buffer.from(credential.ciphertext, "base64")), decipher.final()]).toString("utf8");
     return JSON.parse(clear) as StoredValue;
+  }
+
+  private loadWorkerKey(keyId: string): Buffer {
+    if (keyId !== "local") throw new BadRequestException("Unsupported credential refresh key");
+    return Buffer.from(this.config.getOrThrow<string>("secrets.workerKey"), "base64");
   }
 }
 

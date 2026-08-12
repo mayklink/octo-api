@@ -3,10 +3,11 @@ import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 import type { ReviewCompletedV2, ReviewOutcomeV2 } from "../contracts/review-contracts";
+import { CredentialsService } from "../credentials/credentials.service";
 
 @Injectable()
 export class ResultProcessorService {
-  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
+  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService, private readonly credentials: CredentialsService) {}
 
   async process(routingKey: string, event: ReviewOutcomeV2): Promise<{ duplicate: boolean; sandboxId?: string }> {
     return this.prisma.$transaction(async (tx) => {
@@ -16,6 +17,7 @@ export class ResultProcessorService {
       const job = await tx.reviewJob.findUnique({ where: { id: event.jobId }, include: { repository: { include: { settings: true } }, pullRequest: true, attempts: { where: { attempt: event.attempt }, take: 1 } } });
       const attempt = job?.attempts[0];
       if (!job || !attempt || attempt.eventId !== event.causationId || job.correlationId !== event.correlationId) throw new Error("Outcome identity does not match a known review attempt");
+      await this.credentials.persistCodexRefresh(event);
       if (["completed", "failed", "timed_out"].includes(attempt.status)) { await tx.messageInbox.update({ where: { eventId: event.eventId }, data: { status: "processed", processedAt: new Date() } }); return { duplicate: true, sandboxId: attempt.sandboxId ?? undefined }; }
 
       if (routingKey === "review.completed") await this.complete(tx, job, attempt.id, event as ReviewCompletedV2);
