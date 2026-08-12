@@ -14,7 +14,7 @@ export const CODEX_MODEL_OPTIONS = [
   { value: "gpt-5.6-luna-high", model: "GPT-5.6 Luna", level: "High" },
   { value: "gpt-5.6-luna-medium", model: "GPT-5.6 Luna", level: "Medium" },
   { value: "gpt-5.6-luna-low", model: "GPT-5.6 Luna", level: "Low" },
+  { value: "gpt-5.6-luna", model: "GPT-5.6 Luna", level: "Default" },
 ] as const;
 
 export const CODEX_MODEL_VALUES = CODEX_MODEL_OPTIONS.map(({ value }) => value);
-
