@@ -53,6 +53,7 @@ export class ReviewsService {
     const maxAttempts = Math.min(job.repository.settings.maxAttempts, this.config.getOrThrow<number>("review.maxAttempts"));
     const attempt = job.currentAttempt + 1;
     if (attempt > maxAttempts) throw new BadRequestException("Maximum review attempts reached");
+    const previousAttemptId = job.attempts[0]?.id;
     const [pat, authJson, context] = await Promise.all([
       this.credentials.load(job.organizationId, job.repositoryId, CredentialKind.azure_devops_pat) as Promise<string>,
       this.credentials.load(job.organizationId, null, CredentialKind.codex_auth),
@@ -62,11 +63,19 @@ export class ReviewsService {
     const pullRequest: AzurePullRequest = { id: job.pullRequest.providerPullRequestId, title: job.pullRequest.title, status: job.pullRequest.status, sourceBranch: job.pullRequest.sourceBranch, targetBranch: job.pullRequest.targetBranch, sourceCommit: job.pullRequest.sourceCommit, targetCommit: job.pullRequest.targetCommit, raw: (job.pullRequest.raw ?? {}) as Record<string, unknown> };
     const request = this.buildRequest({ jobId: job.id, eventId, attempt, correlationId: job.correlationId, organizationId: job.organizationId, repository: job.repository, pullRequest, context, settings: job.repository.settings, pat, authJson });
     this.contracts.assertRequest(request);
-    await this.prisma.$transaction([
-      this.prisma.reviewJobAttempt.create({ data: { reviewJobId: job.id, attempt, eventId, deadlineAt: new Date(request.deadlineAt) } }),
-      this.prisma.messageOutbox.create({ data: { eventId, aggregateId: job.id, routingKey: "review.requested", payload: request as unknown as Prisma.InputJsonValue } }),
-      this.prisma.reviewJob.update({ where: { id: job.id }, data: { currentAttempt: attempt, status: "created" } }),
-    ]);
+    await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.reviewJob.updateMany({
+        where: { id: job.id, currentAttempt: job.currentAttempt, status: { in: ["retry_wait", "failed", "completed"] } },
+        data: { currentAttempt: attempt, status: "created" },
+      });
+      if (!claimed.count) throw new ConflictException("Review retry is already being processed");
+
+      if (previousAttemptId) {
+        await tx.reviewJobAttempt.updateMany({ where: { id: previousAttemptId, status: "retry_wait" }, data: { status: "failed", nextRetryAt: null } });
+      }
+      await tx.reviewJobAttempt.create({ data: { reviewJobId: job.id, attempt, eventId, deadlineAt: new Date(request.deadlineAt) } });
+      await tx.messageOutbox.create({ data: { eventId, aggregateId: job.id, routingKey: "review.requested", payload: request as unknown as Prisma.InputJsonValue } });
+    });
     return this.get(job.organizationId, job.id);
   }
 
