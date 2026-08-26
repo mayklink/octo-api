@@ -51,4 +51,4 @@ function parseAzureEvent(value: unknown) {
   if (typeof pr !== "number" && typeof pr !== "string") throw new UnprocessableEntityException("Webhook pull request identity is missing");
   return { id: value.id.slice(0, 256), type: value.eventType, azureRepositoryId: repository.id, projectId: typeof project?.id === "string" ? project.id : undefined, pullRequestId: String(pr), correlationId: typeof value.correlationId === "string" ? value.correlationId : undefined };
 }
-function isRecord(value: unknown): value is Record<string, any> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

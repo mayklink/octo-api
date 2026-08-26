@@ -1,4 +1,4 @@
-import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
+import { MiddlewareConsumer, Module, NestModule, RequestMethod } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { APP_GUARD } from "@nestjs/core";
 import { ScheduleModule } from "@nestjs/schedule";
@@ -18,6 +18,7 @@ import { ReviewsModule } from "./modules/reviews/reviews.module";
 import { MessagingModule } from "./modules/messaging/messaging.module";
 import { WebhooksModule } from "./modules/webhooks/webhooks.module";
 import { ContractsModule } from "./modules/contracts/contracts.module";
+import { WebhookRateLimitMiddleware } from "./modules/webhooks/webhook-rate-limit.middleware";
 
 @Module({
   imports: [
@@ -53,7 +54,10 @@ import { ContractsModule } from "./modules/contracts/contracts.module";
   providers: [{ provide: APP_GUARD, useClass: SupabaseAuthGuard }],
 })
 export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer): void { consumer.apply(CorrelationIdMiddleware).forRoutes("*"); }
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(CorrelationIdMiddleware).forRoutes("*");
+    consumer.apply(WebhookRateLimitMiddleware).forRoutes({ path: "webhooks/azure-devops", method: RequestMethod.POST });
+  }
 }
 
 function redactWebhookToken(url: string): string {

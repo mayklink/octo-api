@@ -14,5 +14,9 @@ module.exports = tseslint.config(
       "@typescript-eslint/no-namespace": "off",
       "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
     }
+  },
+  {
+    files: ["src/**/*.ts"],
+    rules: { "@typescript-eslint/no-explicit-any": "error" }
   }
 );

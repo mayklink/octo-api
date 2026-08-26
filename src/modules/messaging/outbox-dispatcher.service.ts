@@ -13,13 +13,33 @@ export class OutboxDispatcherService {
   async dispatch(): Promise<void> {
     if (this.running || !this.rabbit.isReady) return; this.running = true;
     try {
-      const rows = await this.prisma.messageOutbox.findMany({ where: { status: "pending", availableAt: { lte: new Date() }, OR: [{ leaseUntil: null }, { leaseUntil: { lt: new Date() } }] }, take: 5, orderBy: { createdAt: "asc" } });
+      const now = new Date();
+      const rows = await this.prisma.messageOutbox.findMany({
+        where: {
+          OR: [
+            { status: "pending", availableAt: { lte: now }, OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }] },
+            { status: "processing", leaseUntil: { lt: now } },
+          ],
+        },
+        take: 5,
+        orderBy: { createdAt: "asc" },
+      });
       for (const row of rows) await this.dispatchOne(row.id);
     } finally { this.running = false; }
   }
   private async dispatchOne(id: string): Promise<void> {
     const leaseUntil = new Date(Date.now() + 60_000);
-    const claimed = await this.prisma.messageOutbox.updateMany({ where: { id, status: "pending", OR: [{ leaseUntil: null }, { leaseUntil: { lt: new Date() } }] }, data: { status: "processing", leaseUntil, attempts: { increment: 1 } } });
+    const now = new Date();
+    const claimed = await this.prisma.messageOutbox.updateMany({
+      where: {
+        id,
+        OR: [
+          { status: "pending", availableAt: { lte: now }, OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }] },
+          { status: "processing", leaseUntil: { lt: now } },
+        ],
+      },
+      data: { status: "processing", leaseUntil, attempts: { increment: 1 } },
+    });
     if (!claimed.count) return;
     const row = await this.prisma.messageOutbox.findUniqueOrThrow({ where: { id } }); const event = row.payload as unknown as ReviewRequestedV2;
     try { await this.rabbit.publish(event); }

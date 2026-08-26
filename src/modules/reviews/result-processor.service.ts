@@ -2,8 +2,10 @@ import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
-import type { ReviewCompletedV2, ReviewOutcomeV2 } from "../contracts/review-contracts";
+import type { ReviewCompletedV2, ReviewFailureV2, ReviewOutcomeV2 } from "../contracts/review-contracts";
 import { CredentialsService } from "../credentials/credentials.service";
+
+type ResultJob = Prisma.ReviewJobGetPayload<{ include: { repository: { include: { settings: true } }; pullRequest: true; attempts: true } }>;
 
 @Injectable()
 export class ResultProcessorService {
@@ -22,11 +24,12 @@ export class ResultProcessorService {
 
       if (routingKey === "review.completed") await this.complete(tx, job, attempt.id, event as ReviewCompletedV2);
       else {
-        const failure = (event as Exclude<ReviewOutcomeV2, ReviewCompletedV2>).failure;
+        const failureEvent = event as ReviewFailureV2;
+        const failure = failureEvent.failure;
         const maxAttempts = Math.min(job.repository.settings?.maxAttempts ?? 1, this.config.getOrThrow<number>("review.maxAttempts"));
         const retry = routingKey === "review.attempt_failed" && failure.retryable && event.attempt < maxAttempts;
         const nextRetryAt = retry ? new Date(Date.now() + this.config.getOrThrow<number>("review.retryBaseDelayMs") * 2 ** (event.attempt - 1)) : undefined;
-        await tx.reviewJobAttempt.update({ where: { id: attempt.id }, data: { status: retry ? "retry_wait" : "failed", failureCode: failure.code, failureCategory: failure.category, failureMessage: failure.message, timings: event.timings as Prisma.InputJsonValue | undefined, completedAt: new Date((event as any).failedAt), nextRetryAt } });
+        await tx.reviewJobAttempt.update({ where: { id: attempt.id }, data: { status: retry ? "retry_wait" : "failed", failureCode: failure.code, failureCategory: failure.category, failureMessage: failure.message, timings: event.timings as Prisma.InputJsonValue | undefined, completedAt: new Date(failureEvent.failedAt), nextRetryAt } });
         await tx.reviewJob.update({ where: { id: job.id }, data: { status: retry ? "retry_wait" : "failed", completedAt: retry ? null : new Date() } });
         if (!retry) await tx.reviewPublication.upsert({ where: { dedupKey: `${job.id}:status` }, update: { status: "pending", lastError: null }, create: { dedupKey: `${job.id}:status`, reviewJobId: job.id, kind: "status" } });
       }
@@ -39,7 +42,7 @@ export class ResultProcessorService {
     });
   }
 
-  private async complete(tx: Prisma.TransactionClient, job: any, attemptId: string, event: ReviewCompletedV2): Promise<void> {
+  private async complete(tx: Prisma.TransactionClient, job: ResultJob, attemptId: string, event: ReviewCompletedV2): Promise<void> {
     if (event.organizationId !== job.organizationId || event.repositoryId !== job.repositoryId || event.pullRequestId !== job.pullRequest.providerPullRequestId || event.sourceCommit !== job.pullRequest.sourceCommit || event.targetCommit !== job.pullRequest.targetCommit) throw new Error("Completed outcome does not match persisted review context");
     await tx.reviewFinding.deleteMany({ where: { attemptId } });
     if (event.findings.length) await tx.reviewFinding.createMany({ data: event.findings.map((finding, ordinal) => ({ reviewJobId: job.id, attemptId, ordinal, ...finding })) });

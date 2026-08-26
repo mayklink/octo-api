@@ -23,9 +23,10 @@ export class ContractsService {
     if (content.length > this.maxBytes) throw new BadRequestException("Review outcome exceeds maximum message size");
     let value: unknown; try { value = JSON.parse(content.toString("utf8")); } catch { throw new BadRequestException("Review outcome is not valid JSON"); }
     this.assert(routingKey === "review.completed" ? this.completedValidator : this.failureValidator, value, routingKey);
-    if (routingKey === "review.attempt_failed" && (value as any).failure.retryable !== true) throw new BadRequestException("attempt_failed must be retryable");
-    if (routingKey === "review.failed" && (value as any).failure.retryable !== false) throw new BadRequestException("failed must not be retryable");
-    return value as ReviewOutcomeV2;
+    const outcome = value as ReviewOutcomeV2;
+    if ("failure" in outcome && routingKey === "review.attempt_failed" && outcome.failure.retryable !== true) throw new BadRequestException("attempt_failed must be retryable");
+    if ("failure" in outcome && routingKey === "review.failed" && outcome.failure.retryable !== false) throw new BadRequestException("failed must not be retryable");
+    return outcome;
   }
   private assert(validator: ValidateFunction, value: unknown, name: string): void { if (!validator(value)) throw new BadRequestException(`Invalid ${name}: ${this.errors(validator)}`); }
   private errors(validator: ValidateFunction): string { return (validator.errors ?? []).map((e) => `${e.instancePath || "/"} ${e.message}`).join("; ").slice(0, 1000); }

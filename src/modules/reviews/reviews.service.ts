@@ -1,16 +1,30 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { CredentialKind, JobSource, Prisma, RepositoryStatus } from "@prisma/client";
+import { CredentialKind, JobSource, Prisma, RepositoryStatus, type Repository, type ReviewSetting } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 import { AzureDevOpsAdapter } from "../azure-devops/azure-devops.adapter";
-import type { AzurePullRequest } from "../azure-devops/azure-devops.types";
+import type { AzureContext, AzurePullRequest } from "../azure-devops/azure-devops.types";
 import { ContractsService } from "../contracts/contracts.service";
-import type { EncryptedCredential, ReviewRequestedV2 } from "../contracts/review-contracts";
+import type { EncryptedCredential, ReviewRequestedV2, Severity } from "../contracts/review-contracts";
 import { CredentialsService } from "../credentials/credentials.service";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { RepositoriesService } from "../repositories/repositories.service";
 import type { CreateReviewJobDto, UpdateReviewSettingsDto } from "./reviews.dto";
+
+type BuildRequestArgs = {
+  jobId: string;
+  eventId: string;
+  attempt: number;
+  correlationId: string;
+  organizationId: string;
+  repository: Repository;
+  pullRequest: AzurePullRequest;
+  context: AzureContext;
+  settings: ReviewSetting;
+  pat: string;
+  authJson: unknown;
+};
 
 @Injectable()
 export class ReviewsService {
@@ -57,10 +71,11 @@ export class ReviewsService {
     let eventId: string;
     let request: ReviewRequestedV2;
     try {
+      const patPromise = this.credentials.load(job.organizationId, job.repositoryId, CredentialKind.azure_devops_pat) as Promise<string>;
       const [pat, authJson, context] = await Promise.all([
-        this.credentials.load(job.organizationId, job.repositoryId, CredentialKind.azure_devops_pat) as Promise<string>,
+        patPromise,
         this.credentials.load(job.organizationId, null, CredentialKind.codex_auth),
-        this.azure.getReviewContext(job.repository, await this.credentials.load(job.organizationId, job.repositoryId, CredentialKind.azure_devops_pat) as string, job.pullRequest.providerPullRequestId),
+        patPromise.then((value) => this.azure.getReviewContext(job.repository, value, job.pullRequest.providerPullRequestId)),
       ]);
       eventId = randomUUID();
       const pullRequest: AzurePullRequest = { id: job.pullRequest.providerPullRequestId, title: job.pullRequest.title, status: job.pullRequest.status, sourceBranch: job.pullRequest.sourceBranch, targetBranch: job.pullRequest.targetBranch, sourceCommit: job.pullRequest.sourceCommit, targetCommit: job.pullRequest.targetCommit, raw: (job.pullRequest.raw ?? {}) as Record<string, unknown> };
@@ -99,10 +114,11 @@ export class ReviewsService {
   loadRetryJob(jobId: string) { return this.prisma.reviewJob.findUnique({ where: { id: jobId }, include: { pullRequest: true, attempts: { orderBy: { attempt: "desc" }, take: 1 }, repository: { include: { settings: true } } } }); }
   findByCorrelationId(correlationId: string) { return this.prisma.reviewJob.findUnique({ where: { correlationId } }); }
 
-  private buildRequest(args: any): ReviewRequestedV2 {
+  private buildRequest(args: BuildRequestArgs): ReviewRequestedV2 {
     const createdAt = new Date(); const deadlineAt = new Date(createdAt.getTime() + this.config.getOrThrow<number>("review.timeoutMs"));
     const empty: EncryptedCredential = { algorithm: "A256GCM", keyId: "local", iv: "AAAAAAAAAAAAAAAA", ciphertext: "x", authTag: "AAAAAAAAAAAAAAAAAAAAAA==" };
-    const request: ReviewRequestedV2 = { schemaVersion: 2, eventId: args.eventId, jobId: args.jobId, attempt: args.attempt, correlationId: args.correlationId, organizationId: args.organizationId, repositoryId: args.repository.id, provider: "azure-devops", pullRequestId: args.pullRequest.id, sourceCommit: args.pullRequest.sourceCommit, targetCommit: args.pullRequest.targetCommit, sourceBranch: args.pullRequest.sourceBranch, targetBranch: args.pullRequest.targetBranch, clone: { url: args.repository.cloneUrl }, sourceControl: { encryptedCredential: empty }, context: { sections: buildContextSections(args.context) }, engine: { kind: "codex", model: args.settings.model, encryptedCredential: empty }, settings: { prompt: args.settings.prompt, ...(args.settings.severityThreshold ? { severityThreshold: args.settings.severityThreshold } : {}) }, createdAt: createdAt.toISOString(), deadlineAt: deadlineAt.toISOString() };
+    const severityThreshold = isSeverity(args.settings.severityThreshold) ? args.settings.severityThreshold : undefined;
+    const request: ReviewRequestedV2 = { schemaVersion: 2, eventId: args.eventId, jobId: args.jobId, attempt: args.attempt, correlationId: args.correlationId, organizationId: args.organizationId, repositoryId: args.repository.id, provider: "azure-devops", pullRequestId: args.pullRequest.id, sourceCommit: args.pullRequest.sourceCommit, targetCommit: args.pullRequest.targetCommit, sourceBranch: args.pullRequest.sourceBranch, targetBranch: args.pullRequest.targetBranch, clone: { url: args.repository.cloneUrl }, sourceControl: { encryptedCredential: empty }, context: { sections: buildContextSections(args.context) }, engine: { kind: "codex", model: args.settings.model, encryptedCredential: empty }, settings: { prompt: args.settings.prompt, ...(severityThreshold ? { severityThreshold } : {}) }, createdAt: createdAt.toISOString(), deadlineAt: deadlineAt.toISOString() };
     request.sourceControl.encryptedCredential = this.credentials.createWorkerEnvelope(request, "source-control", { git: { username: "octob", password: args.pat } });
     request.engine.encryptedCredential = this.credentials.createWorkerEnvelope(request, "engine", args.authJson);
     return request;
@@ -150,3 +166,4 @@ function summarizeWorkItem(value: unknown): unknown {
 function serializeContext(value: unknown): string { return truncateContext(JSON.stringify(value)); }
 function truncateContext(value: string): string { return value.length <= 50_000 ? value : `${value.slice(0, 49_970)}\n[context truncated]`; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function isSeverity(value: unknown): value is Severity { return value === "info" || value === "warning" || value === "error"; }

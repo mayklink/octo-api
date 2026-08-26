@@ -25,6 +25,7 @@ const schema = z.object({
   MAX_REVIEW_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   RETRY_BASE_DELAY_MS: positiveInt.default(30000),
   PUBLIC_API_URL: z.string().url(),
+  CORS_ALLOWED_ORIGINS: z.string().min(1).default("http://localhost:5173"),
   AZURE_DEVOPS_API_VERSION: z.string().default("7.1"),
 });
 
@@ -38,6 +39,10 @@ export function validateEnvironment(value: Record<string, unknown>): Environment
   const allowedModels = result.data.ALLOWED_CODEX_MODELS.split(",").map((v) => v.trim());
   if (!allowedModels.includes(result.data.DEFAULT_CODEX_MODEL)) {
     throw new Error("DEFAULT_CODEX_MODEL must be included in ALLOWED_CODEX_MODELS");
+  }
+  const corsOrigins = result.data.CORS_ALLOWED_ORIGINS.split(",").map((value) => value.trim()).filter(Boolean);
+  if (!corsOrigins.length || corsOrigins.some((origin) => origin === "*" || !URL.canParse(origin))) {
+    throw new Error("CORS_ALLOWED_ORIGINS must contain comma-separated absolute origins and cannot contain *");
   }
   return result.data;
 }

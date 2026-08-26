@@ -3,21 +3,26 @@ import { ConfigService } from "@nestjs/config";
 import type { ReviewFinding } from "@prisma/client";
 import type { AzureContext, AzureDiscoveredRepository, AzurePullRequest, AzureRepositoryConfig } from "./azure-devops.types";
 
+const AZURE_PROJECT_CONCURRENCY = 5;
+type AzureProject = { id: string; name?: unknown };
+type AzureRepositoryResponse = { id: string; name?: unknown; remoteUrl: string };
+
 @Injectable()
 export class AzureDevOpsAdapter {
   private readonly apiVersion: string;
   constructor(config: ConfigService) { this.apiVersion = config.get("azure.apiVersion", "7.1"); }
 
   async validateConnection(config: AzureRepositoryConfig, pat: string): Promise<{ name: string; cloneUrl: string }> {
-    const repository = await this.request<any>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}`);
-    if (!repository?.id || !repository?.remoteUrl) throw new BadGatewayException("Azure DevOps returned an invalid repository");
+    const repository = await this.request<unknown>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}`);
+    if (!isRecord(repository) || typeof repository.id !== "string" || typeof repository.remoteUrl !== "string") throw new BadGatewayException("Azure DevOps returned an invalid repository");
     return { name: String(repository.name), cloneUrl: sanitizeCloneUrl(String(repository.remoteUrl)) };
   }
 
   async getPullRequest(config: AzureRepositoryConfig, pat: string, pullRequestId: string): Promise<AzurePullRequest> {
-    const value = await this.request<any>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}/pullRequests/${encodeURIComponent(pullRequestId)}`);
-    const sourceCommit = String(value?.lastMergeSourceCommit?.commitId ?? "");
-    const targetCommit = String(value?.lastMergeTargetCommit?.commitId ?? "");
+    const value = await this.request<unknown>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}/pullRequests/${encodeURIComponent(pullRequestId)}`);
+    if (!isRecord(value)) throw new BadGatewayException("Azure DevOps returned an invalid pull request");
+    const sourceCommit = String(isRecord(value.lastMergeSourceCommit) ? value.lastMergeSourceCommit.commitId ?? "" : "");
+    const targetCommit = String(isRecord(value.lastMergeTargetCommit) ? value.lastMergeTargetCommit.commitId ?? "" : "");
     if (!/^[a-f0-9]{40,64}$/i.test(sourceCommit) || !/^[a-f0-9]{40,64}$/i.test(targetCommit)) throw new BadGatewayException("Azure DevOps did not return complete source and target commits");
     return { id: String(value.pullRequestId), title: String(value.title ?? "Pull request"), status: String(value.status ?? "unknown"), sourceBranch: String(value.sourceRefName), targetBranch: String(value.targetRefName), sourceCommit, targetCommit, raw: value };
   }
@@ -48,22 +53,28 @@ export class AzureDevOpsAdapter {
   }
 
   async listRepositories(organization: string, pat: string): Promise<AzureDiscoveredRepository[]> {
-    const projects = await this.requestOrg<{ value?: any[] }>(organization, pat, "/_apis/projects?$top=1000");
-    const projectList = (projects.value ?? []).filter((project) => isRecord(project) && typeof project.id === "string").slice(0, 200);
-    const repositoriesByProject = await Promise.all(projectList.map(async (project) => {
-      const repos = await this.requestOrg<{ value?: any[] }>(organization, pat, `/${encodeURIComponent(String(project.id))}/_apis/git/repositories`);
-      return (repos.value ?? []).flatMap((repo): AzureDiscoveredRepository[] => {
-        if (!isRecord(repo) || typeof repo.id !== "string" || typeof repo.remoteUrl !== "string") return [];
-        try {
-          return [{ projectId: String(project.id), projectName: String(project.name ?? project.id), repositoryId: String(repo.id), repositoryName: String(repo.name ?? repo.id), cloneUrl: sanitizeCloneUrl(String(repo.remoteUrl)) }];
-        } catch { return []; }
-      });
-    }));
+    const projects = await this.requestOrg<{ value?: unknown[] }>(organization, pat, "/_apis/projects?$top=1000");
+    const projectList = (projects.value ?? []).flatMap((project): AzureProject[] => isRecord(project) && typeof project.id === "string" ? [{ id: project.id, name: project.name }] : []).slice(0, 200);
+    const repositoriesByProject = await mapWithConcurrency(projectList, AZURE_PROJECT_CONCURRENCY, async (project) => {
+      try {
+        const repos = await this.requestOrg<{ value?: unknown[] }>(organization, pat, `/${encodeURIComponent(project.id)}/_apis/git/repositories`);
+        return (repos.value ?? []).flatMap((repo): AzureDiscoveredRepository[] => {
+          if (!isAzureRepository(repo)) return [];
+          try {
+            return [{ projectId: project.id, projectName: String(project.name ?? project.id), repositoryId: repo.id, repositoryName: String(repo.name ?? repo.id), cloneUrl: sanitizeCloneUrl(repo.remoteUrl) }];
+          } catch { return []; }
+        });
+      } catch (error) {
+        if (error instanceof UnauthorizedException) throw error;
+        if (error instanceof BadGatewayException) return [];
+        throw error;
+      }
+    });
     return repositoriesByProject.flat();
   }
 
   async listPullRequests(config: AzureRepositoryConfig, pat: string): Promise<AzurePullRequest[]> {
-    const result = await this.request<{ value?: any[] }>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}/pullrequests?searchCriteria.status=active&$top=100`);
+    const result = await this.request<{ value?: unknown[] }>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}/pullrequests?searchCriteria.status=active&$top=100`);
     return (result.value ?? []).flatMap((value): AzurePullRequest[] => {
       if (!isRecord(value) || value.pullRequestId === undefined) return [];
       return [{
@@ -79,19 +90,32 @@ export class AzureDevOpsAdapter {
     });
   }
 
-  async publishFinding(config: AzureRepositoryConfig, pat: string, pullRequestId: string, finding: ReviewFinding): Promise<string> {
-    const content = [`**${finding.severity.toUpperCase()}: ${finding.title}**`, finding.description, finding.suggestion ? `\nSugestão:\n${finding.suggestion}` : ""].filter(Boolean).join("\n\n");
+  async findPublication(config: AzureRepositoryConfig, pat: string, pullRequestId: string, dedupKey: string): Promise<string | undefined> {
+    const result = await this.request<{ value?: unknown[] }>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}/pullRequests/${encodeURIComponent(pullRequestId)}/threads`);
+    const marker = publicationMarker(dedupKey);
+    for (const thread of result.value ?? []) {
+      if (!isRecord(thread) || !Array.isArray(thread.comments)) continue;
+      const found = thread.comments.some((comment) => isRecord(comment) && typeof comment.content === "string" && comment.content.includes(marker));
+      if (found && thread.id !== undefined) return String(thread.id);
+    }
+    return undefined;
+  }
+
+  async publishFinding(config: AzureRepositoryConfig, pat: string, pullRequestId: string, finding: ReviewFinding, dedupKey: string): Promise<string> {
+    const content = [`**${finding.severity.toUpperCase()}: ${finding.title}**`, finding.description, finding.suggestion ? `\nSugestão:\n${finding.suggestion}` : "", publicationMarker(dedupKey)].filter(Boolean).join("\n\n");
     const body: Record<string, unknown> = { comments: [{ parentCommentId: 0, content, commentType: 1 }], status: 1 };
     if (finding.line) body.threadContext = { filePath: finding.filePath.startsWith("/") ? finding.filePath : `/${finding.filePath}`, rightFileStart: { line: finding.line, offset: 1 }, rightFileEnd: { line: finding.line, offset: 1 } };
-    const created = await this.request<any>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}/pullRequests/${encodeURIComponent(pullRequestId)}/threads`, { method: "POST", body });
+    const created = await this.request<unknown>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}/pullRequests/${encodeURIComponent(pullRequestId)}/threads`, { method: "POST", body });
+    if (!isRecord(created) || created.id === undefined) throw new BadGatewayException("Azure DevOps returned an invalid thread");
     return String(created.id);
   }
 
-  async publishSummary(config: AzureRepositoryConfig, pat: string, pullRequestId: string, content: string): Promise<string> {
-    const created = await this.request<any>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}/pullRequests/${encodeURIComponent(pullRequestId)}/threads`, {
+  async publishSummary(config: AzureRepositoryConfig, pat: string, pullRequestId: string, content: string, dedupKey: string): Promise<string> {
+    const created = await this.request<unknown>(config, pat, `/_apis/git/repositories/${encodeURIComponent(config.azureRepositoryId)}/pullRequests/${encodeURIComponent(pullRequestId)}/threads`, {
       method: "POST",
-      body: { comments: [{ parentCommentId: 0, content, commentType: 1 }], status: 1 },
+      body: { comments: [{ parentCommentId: 0, content: `${content}\n\n${publicationMarker(dedupKey)}`, commentType: 1 }], status: 1 },
     });
+    if (!isRecord(created) || created.id === undefined) throw new BadGatewayException("Azure DevOps returned an invalid thread");
     return String(created.id);
   }
 
@@ -142,4 +166,26 @@ function sanitizeCloneUrl(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAzureRepository(value: unknown): value is AzureRepositoryResponse {
+  return isRecord(value) && typeof value.id === "string" && typeof value.remoteUrl === "string";
+}
+
+function publicationMarker(dedupKey: string): string {
+  return `<!-- octob-publication:${dedupKey.replace(/[^A-Za-z0-9:_-]/g, "")} -->`;
+}
+
+async function mapWithConcurrency<T, R>(values: T[], concurrency: number, operation: (value: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  async function worker(): Promise<void> {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await operation(values[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, () => worker()));
+  return results;
 }

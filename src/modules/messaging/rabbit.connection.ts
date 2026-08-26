@@ -5,6 +5,9 @@ import type { Channel, ChannelModel, ConfirmChannel, ConsumeMessage, Options } f
 import { PinoLogger } from "nestjs-pino";
 import { ContractsService } from "../contracts/contracts.service";
 import { ResultProcessorService } from "../reviews/result-processor.service";
+import type { ReviewRequestedV2 } from "../contracts/review-contracts";
+
+type RabbitConfig = { url: string; exchange: string; inputQueue: string; resultsQueue: string; dlx: string };
 
 @Injectable()
 export class RabbitConnection implements OnModuleInit, OnModuleDestroy {
@@ -18,7 +21,7 @@ export class RabbitConnection implements OnModuleInit, OnModuleDestroy {
   }
   async onModuleDestroy(): Promise<void> { this.shuttingDown = true; this.isReady = false; await this.consumer?.close().catch(() => undefined); await this.publisher?.close().catch(() => undefined); await this.connection?.close().catch(() => undefined); }
 
-  async publish(event: any): Promise<void> {
+  async publish(event: ReviewRequestedV2): Promise<void> {
     if (!this.publisher || !this.isReady) throw new Error("RabbitMQ publisher is not ready");
     const messageId = String(event.eventId); const body = Buffer.from(JSON.stringify(event));
     const options: Options.Publish = { persistent: true, mandatory: true, contentType: "application/json", contentEncoding: "utf-8", messageId, correlationId: event.correlationId, type: "review.requested.v2", timestamp: Date.now(), headers: { schemaVersion: 2, attempt: event.attempt } };
@@ -28,7 +31,7 @@ export class RabbitConnection implements OnModuleInit, OnModuleDestroy {
   }
 
   private async connect(): Promise<void> {
-    const rabbit = this.config.getOrThrow<any>("rabbit");
+    const rabbit = this.config.getOrThrow<RabbitConfig>("rabbit");
     this.connection = await amqp.connect(rabbit.url, { timeout: 10_000, clientProperties: { connection_name: `octo-api-${process.pid}` } });
     this.connection.on("error", (error) => this.logger.error({ err: error }, "RabbitMQ connection error"));
     this.connection.on("close", () => { this.isReady = false; if (!this.shuttingDown) setTimeout(() => void this.reconnect(), 5_000); });
