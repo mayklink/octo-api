@@ -44,6 +44,12 @@ export class CredentialsService {
     return this.decryptAtRest(credential, organizationId, repositoryId).value;
   }
 
+  async loadIfConfigured(organizationId: string, repositoryId: string | null, kind: CredentialKind): Promise<unknown | undefined> {
+    const credential = await this.prisma.integrationCredential.findFirst({ where: { organizationId, repositoryId, kind } });
+    if (!credential) return undefined;
+    return this.decryptAtRest(credential, organizationId, repositoryId).value;
+  }
+
   async persistCodexRefresh(event: ReviewOutcomeV2): Promise<boolean> {
     const refresh = event.credentialRefresh;
     if (!refresh) return false;

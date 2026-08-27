@@ -8,6 +8,7 @@ export default () => {
     rabbit: { url: env.RABBITMQ_URL, exchange: env.RABBITMQ_EXCHANGE, inputQueue: env.RABBITMQ_INPUT_QUEUE, resultsQueue: env.RABBITMQ_RESULTS_QUEUE, dlx: env.RABBITMQ_DLX },
     secrets: { dataKey: env.OCTOB_DATA_ENCRYPTION_KEY, workerKey: env.OCTOB_CREDENTIAL_KEY_LOCAL },
     review: { allowedModels: env.ALLOWED_CODEX_MODELS.split(",").map((v) => v.trim()), defaultModel: env.DEFAULT_CODEX_MODEL, maxMessageBytes: env.MAX_MESSAGE_BYTES, timeoutMs: env.REVIEW_TIMEOUT_MS, maxAttempts: env.MAX_REVIEW_ATTEMPTS, retryBaseDelayMs: env.RETRY_BASE_DELAY_MS },
+    codex: { binary: env.CODEX_BINARY, statusTimeoutMs: env.CODEX_STATUS_TIMEOUT_MS, statusCacheTtlMs: env.CODEX_STATUS_CACHE_TTL_MS },
     azure: { apiVersion: env.AZURE_DEVOPS_API_VERSION },
   };
 };

@@ -1,14 +1,22 @@
-import { Body, Controller, ForbiddenException, Param, ParseUUIDPipe, Put } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Put, Query } from "@nestjs/common";
 import { CredentialKind } from "@prisma/client";
 import { CurrentUser } from "../auth/current-user.decorator";
 import type { AuthContext } from "../auth/auth-context";
 import { Roles } from "../auth/roles.decorator";
-import { ConfigureCodexDto } from "./credentials.dto";
+import { CodexUsageService } from "./codex-usage.service";
+import { ConfigureCodexDto, ReadCodexStatusDto } from "./credentials.dto";
 import { CredentialsService } from "./credentials.service";
 
 @Controller("organizations/:organizationId/integrations")
 export class CredentialsController {
-  constructor(private readonly credentials: CredentialsService) {}
+  constructor(private readonly credentials: CredentialsService, private readonly codexUsage: CodexUsageService) {}
+
+  @Get("codex/status")
+  @Roles("owner", "admin")
+  getCodexStatus(@CurrentUser() auth: AuthContext, @Param("organizationId", ParseUUIDPipe) organizationId: string, @Query() query: ReadCodexStatusDto) {
+    if (auth.organizationId !== organizationId) throw new ForbiddenException("Organization context mismatch");
+    return this.codexUsage.getStatus(organizationId, query.refresh === "true");
+  }
 
   @Put("codex")
   @Roles("owner", "admin")
