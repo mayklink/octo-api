@@ -4,7 +4,7 @@ import { CredentialKind } from "@prisma/client";
 import { spawn } from "node:child_process";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import path from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { codexAuthenticationMode, type CodexAuthenticationMode, CredentialsService } from "./credentials.service";
 
 export type CodexCapacityWindow = {
@@ -112,10 +112,10 @@ export class CodexUsageService {
   }
 
   private async readSnapshot(authJson: unknown): Promise<{ planType: string | null; rateLimits: unknown }> {
-    const directory = await mkdtemp(path.join(tmpdir(), "octob-codex-status-"));
+    const directory = await mkdtemp(join(tmpdir(), "octob-codex-status-"));
     await chmod(directory, 0o700);
     try {
-      await writeFile(path.join(directory, "auth.json"), JSON.stringify(authJson), { mode: 0o600 });
+      await writeFile(join(directory, "auth.json"), JSON.stringify(authJson), { mode: 0o600 });
       return await runAppServer(
         resolveBinary(this.config.get<string>("codex.binary", "node_modules/.bin/codex")),
         directory,
@@ -127,7 +127,7 @@ export class CodexUsageService {
   }
 
   private async verifyAuthentication(authJson: unknown): Promise<void> {
-    const directory = await mkdtemp(path.join(tmpdir(), "octob-codex-status-"));
+    const directory = await mkdtemp(join(tmpdir(), "octob-codex-status-"));
     await chmod(directory, 0o700);
     try {
       const apiKey = readApiKey(authJson);
@@ -246,7 +246,7 @@ function clamp(value: number): number { return Math.min(100, Math.max(0, Math.ro
 function asRecord(value: unknown): Record<string, unknown> | undefined { return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function stringOrNull(value: unknown): string | null { return typeof value === "string" && value ? value : null; }
 function isMissingBinary(error: unknown): boolean { return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"; }
-function resolveBinary(binary: string): string { return binary.includes(path.sep) && !path.isAbsolute(binary) ? path.resolve(process.cwd(), binary) : binary; }
+function resolveBinary(binary: string): string { return binary.includes(sep) && !isAbsolute(binary) ? resolve(process.cwd(), binary) : binary; }
 
 function verifyBinary(binary: string, timeoutMs: number): Promise<boolean> {
   return new Promise((resolve) => {
