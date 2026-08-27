@@ -38,6 +38,8 @@ export class CodexUsageService {
 
   constructor(private readonly config: ConfigService, private readonly credentials: CredentialsService) {}
 
+  invalidate(organizationId: string): void { this.cache.delete(organizationId); }
+
   async getStatus(organizationId: string, refresh = false): Promise<CodexStatus> {
     const cached = this.cache.get(organizationId);
     if (!refresh && cached && cached.expiresAt > Date.now()) return cached.value;

@@ -23,6 +23,7 @@ const schema = z.object({
   CODEX_BINARY: z.string().min(1).default("node_modules/.bin/codex"),
   CODEX_STATUS_TIMEOUT_MS: positiveInt.max(30000).default(10000),
   CODEX_STATUS_CACHE_TTL_MS: positiveInt.max(300000).default(60000),
+  CODEX_DEVICE_AUTH_TIMEOUT_MS: positiveInt.max(900000).default(900000),
   MAX_MESSAGE_BYTES: positiveInt.default(262144),
   REVIEW_TIMEOUT_MS: positiveInt.max(900000).default(900000),
   MAX_REVIEW_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),

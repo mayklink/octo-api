@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, ForbiddenException, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query } from "@nestjs/common";
 import { CredentialKind } from "@prisma/client";
 import { CurrentUser } from "../auth/current-user.decorator";
 import type { AuthContext } from "../auth/auth-context";
@@ -6,10 +6,11 @@ import { Roles } from "../auth/roles.decorator";
 import { CodexUsageService } from "./codex-usage.service";
 import { ConfigureCodexDto, ReadCodexStatusDto } from "./credentials.dto";
 import { CredentialsService } from "./credentials.service";
+import { CodexDeviceAuthService } from "./codex-device-auth.service";
 
 @Controller("organizations/:organizationId/integrations")
 export class CredentialsController {
-  constructor(private readonly credentials: CredentialsService, private readonly codexUsage: CodexUsageService) {}
+  constructor(private readonly credentials: CredentialsService, private readonly codexUsage: CodexUsageService, private readonly deviceAuth: CodexDeviceAuthService) {}
 
   @Get("codex/status")
   @Roles("owner", "admin")
@@ -25,5 +26,27 @@ export class CredentialsController {
     const { mode, value } = this.credentials.normalizeCodexConfiguration(dto.mode, dto.authJson, dto.apiKey);
     await this.credentials.store(organizationId, null, CredentialKind.codex_auth, value);
     return { connected: true, authenticationMode: mode, validatedAt: new Date().toISOString() };
+  }
+
+  @Post("codex/device-auth")
+  @Roles("owner", "admin")
+  startCodexDeviceAuth(@CurrentUser() auth: AuthContext, @Param("organizationId", ParseUUIDPipe) organizationId: string) {
+    if (auth.organizationId !== organizationId) throw new ForbiddenException("Organization context mismatch");
+    return this.deviceAuth.start(organizationId);
+  }
+
+  @Get("codex/device-auth/:sessionId")
+  @Roles("owner", "admin")
+  getCodexDeviceAuth(@CurrentUser() auth: AuthContext, @Param("organizationId", ParseUUIDPipe) organizationId: string, @Param("sessionId") sessionId: string) {
+    if (auth.organizationId !== organizationId) throw new ForbiddenException("Organization context mismatch");
+    return this.deviceAuth.get(organizationId, sessionId);
+  }
+
+  @Delete("codex/device-auth/:sessionId")
+  @HttpCode(200)
+  @Roles("owner", "admin")
+  cancelCodexDeviceAuth(@CurrentUser() auth: AuthContext, @Param("organizationId", ParseUUIDPipe) organizationId: string, @Param("sessionId") sessionId: string) {
+    if (auth.organizationId !== organizationId) throw new ForbiddenException("Organization context mismatch");
+    return this.deviceAuth.cancel(organizationId, sessionId);
   }
 }
