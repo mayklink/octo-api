@@ -36,7 +36,11 @@ export class OrganizationsService {
     }
     if (!dto.allowedModels.includes(dto.defaultModel)) throw new BadRequestException("defaultModel must be included in allowedModels");
     try {
-      const organization = await this.prisma.organization.update({ where: { id: organizationId }, data: { allowedModels: dto.allowedModels, defaultModel: dto.defaultModel }, select: { allowedModels: true, defaultModel: true } });
+      const organization = await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.organization.update({ where: { id: organizationId }, data: { allowedModels: dto.allowedModels, defaultModel: dto.defaultModel }, select: { allowedModels: true, defaultModel: true } });
+        await tx.reviewSetting.updateMany({ where: { repository: { is: { organizationId } }, model: { notIn: dto.allowedModels } }, data: { model: dto.defaultModel } });
+        return updated;
+      });
       return { allowedModels: organization.allowedModels, defaultModel: organization.defaultModel! };
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") throw new NotFoundException("Organization not found");
