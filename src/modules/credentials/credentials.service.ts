@@ -6,6 +6,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 import type { EncryptedCredential, ReviewOutcomeV2, ReviewRequestedV2 } from "../contracts/review-contracts";
 
 type StoredValue = { value: unknown };
+export type CodexAuthenticationMode = "chatgpt" | "api_key";
 
 @Injectable()
 export class CredentialsService {
@@ -18,12 +19,31 @@ export class CredentialsService {
 
   validateCodexAuth(value: unknown): Record<string, unknown> {
     if (!isRecord(value)) throw new BadRequestException("authJson must be an object");
-    if (value.OPENAI_API_KEY !== undefined && value.OPENAI_API_KEY !== null) throw new BadRequestException("OPENAI_API_KEY must be absent or null");
+    if (typeof value.OPENAI_API_KEY === "string" && value.OPENAI_API_KEY.trim()) {
+      if (value.tokens !== undefined && value.tokens !== null) throw new BadRequestException("API-key authentication must not include ChatGPT tokens");
+      return { auth_mode: "apikey", OPENAI_API_KEY: value.OPENAI_API_KEY.trim() };
+    }
+    if (value.OPENAI_API_KEY !== undefined && value.OPENAI_API_KEY !== null) throw new BadRequestException("OPENAI_API_KEY must be a non-empty string");
     if (!isRecord(value.tokens)) throw new BadRequestException("authJson.tokens is required");
     for (const field of ["access_token", "refresh_token", "account_id"] as const) {
       if (typeof value.tokens[field] !== "string" || !value.tokens[field]) throw new BadRequestException(`authJson.tokens.${field} is required`);
     }
     return value;
+  }
+
+  normalizeCodexConfiguration(mode: CodexAuthenticationMode | undefined, authJson: unknown, apiKey: unknown): { mode: CodexAuthenticationMode; value: Record<string, unknown> } {
+    const hasAuthJson = authJson !== undefined;
+    const hasApiKey = apiKey !== undefined;
+    if (hasAuthJson === hasApiKey) throw new BadRequestException("Provide exactly one Codex credential");
+    const resolvedMode = mode ?? (hasApiKey ? "api_key" : "chatgpt");
+    if (resolvedMode === "api_key") {
+      if (!hasApiKey || typeof apiKey !== "string" || !apiKey.trim()) throw new BadRequestException("apiKey is required for API-key authentication");
+      return { mode: resolvedMode, value: this.validateCodexAuth({ auth_mode: "apikey", OPENAI_API_KEY: apiKey }) };
+    }
+    if (!hasAuthJson) throw new BadRequestException("authJson is required for ChatGPT authentication");
+    const value = this.validateCodexAuth(authJson);
+    if (codexAuthenticationMode(value) !== "chatgpt") throw new BadRequestException("authJson must contain a ChatGPT authentication cache");
+    return { mode: resolvedMode, value };
   }
 
   async store(organizationId: string, repositoryId: string | null, kind: CredentialKind, value: unknown): Promise<void> {
@@ -124,3 +144,13 @@ export class CredentialsService {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+
+export function codexAuthenticationMode(value: unknown): CodexAuthenticationMode | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.OPENAI_API_KEY === "string" && value.OPENAI_API_KEY.trim() && (value.auth_mode === "apikey" || value.auth_mode === "api_key")) return "api_key";
+  if (isRecord(value.tokens)
+    && typeof value.tokens.access_token === "string" && value.tokens.access_token
+    && typeof value.tokens.refresh_token === "string" && value.tokens.refresh_token
+    && typeof value.tokens.account_id === "string" && value.tokens.account_id) return "chatgpt";
+  return null;
+}

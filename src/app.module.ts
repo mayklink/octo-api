@@ -26,7 +26,7 @@ import { WebhookRateLimitMiddleware } from "./modules/webhooks/webhook-rate-limi
     LoggerModule.forRootAsync({ inject: [ConfigService], useFactory: (config: ConfigService) => ({
       pinoHttp: {
         level: config.get("app.logLevel", "info"),
-        redact: { paths: ["req.headers.authorization", "req.query.token", "*.password", "*.pat", "*.authJson", "*.ciphertext", "*.serviceRoleKey", "*.SUPABASE_SERVICE_ROLE_KEY"], censor: "[REDACTED]" },
+        redact: { paths: ["req.headers.authorization", "req.query.token", "*.password", "*.pat", "*.authJson", "*.apiKey", "*.OPENAI_API_KEY", "*.ciphertext", "*.serviceRoleKey", "*.SUPABASE_SERVICE_ROLE_KEY"], censor: "[REDACTED]" },
         serializers: {
           req: (req) => ({ ...req, url: redactWebhookToken(req.url) }),
         },

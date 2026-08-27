@@ -22,8 +22,8 @@ export class CredentialsController {
   @Roles("owner", "admin")
   async configureCodex(@CurrentUser() auth: AuthContext, @Param("organizationId", ParseUUIDPipe) organizationId: string, @Body() dto: ConfigureCodexDto) {
     if (auth.organizationId !== organizationId) throw new ForbiddenException("Organization context mismatch");
-    const value = this.credentials.validateCodexAuth(dto.authJson);
+    const { mode, value } = this.credentials.normalizeCodexConfiguration(dto.mode, dto.authJson, dto.apiKey);
     await this.credentials.store(organizationId, null, CredentialKind.codex_auth, value);
-    return { connected: true, validatedAt: new Date().toISOString() };
+    return { connected: true, authenticationMode: mode, validatedAt: new Date().toISOString() };
   }
 }

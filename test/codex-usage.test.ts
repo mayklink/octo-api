@@ -65,4 +65,26 @@ readline.on("line", (line) => {
       if (previous === undefined) delete process.env.RABBITMQ_URL; else process.env.RABBITMQ_URL = previous;
     }
   });
+
+  it("reports API-key consumption without inventing ChatGPT quota windows", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "octob-codex-api-key-status-test-"));
+    created.push(root);
+    const executable = path.join(root, "codex");
+    await writeFile(executable, `#!/usr/bin/env node
+const fs = require("node:fs");
+const auth = JSON.parse(fs.readFileSync(process.env.CODEX_HOME + "/auth.json", "utf8"));
+process.exit(process.argv[2] === "login" && auth.auth_mode === "apikey" && auth.OPENAI_API_KEY === "sk-test" ? 0 : 4);
+`, { mode: 0o700 });
+    await chmod(executable, 0o700);
+    const credentials = { loadIfConfigured: vi.fn().mockResolvedValue({ auth_mode: "apikey", OPENAI_API_KEY: "sk-test" }) } as unknown as CredentialsService;
+    const service = new CodexUsageService(new ConfigService({ codex: { binary: executable, statusTimeoutMs: 5_000 } }), credentials);
+    await expect(service.getStatus("org-api-key")).resolves.toMatchObject({
+      state: "available",
+      configured: true,
+      installed: true,
+      authenticationMode: "api_key",
+      planType: null,
+      windows: [],
+    });
+  });
 });

@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CredentialsService } from "./credentials.service";
+import { codexAuthenticationMode, type CodexAuthenticationMode, CredentialsService } from "./credentials.service";
 
 export type CodexCapacityWindow = {
   label: string;
@@ -22,6 +22,7 @@ export type CodexStatus = {
   state: "available" | "not_configured" | "unavailable";
   installed: boolean;
   configured: boolean;
+  authenticationMode: CodexAuthenticationMode | null;
   planType: string | null;
   windows: CodexCapacityWindow[];
   checkedAt: string;
@@ -56,25 +57,46 @@ export class CodexUsageService {
       });
     }
 
+    const authenticationMode = codexAuthenticationMode(authJson);
+    if (authenticationMode === "api_key") {
+      try {
+        await this.verifyAuthentication(authJson);
+        return this.remember(organizationId, {
+          ...baseStatus(checkedAt), configured: true, installed: true, authenticationMode,
+          state: "available",
+          message: "API key conectada. O uso é cobrado por consumo e não possui franquia ChatGPT para exibir.",
+        });
+      } catch (error) {
+        const installed = !isMissingBinary(error);
+        return this.remember(organizationId, {
+          ...baseStatus(checkedAt), configured: true, installed, authenticationMode,
+          state: "unavailable",
+          message: installed
+            ? "A API key não pôde ser carregada pelo Codex. Atualize a credencial e tente novamente."
+            : "A CLI do Codex não está instalada no serviço da API.",
+        });
+      }
+    }
+
     try {
       const snapshot = await this.readSnapshot(authJson);
       const windows = normalizeWindows(snapshot.rateLimits);
       if (!windows.length) {
         return this.remember(organizationId, {
-          ...baseStatus(checkedAt), configured: true, installed: true,
+          ...baseStatus(checkedAt), configured: true, installed: true, authenticationMode: "chatgpt",
           state: "unavailable", planType: snapshot.planType,
           message: "O Codex está conectado, mas não informou janelas de franquia para esta conta.",
         });
       }
       return this.remember(organizationId, {
-        ...baseStatus(checkedAt), configured: true, installed: true,
+        ...baseStatus(checkedAt), configured: true, installed: true, authenticationMode: "chatgpt",
         state: "available", planType: snapshot.planType, windows,
         message: "Franquia consultada diretamente no Codex.",
       });
     } catch (error) {
       const installed = !isMissingBinary(error);
       return this.remember(organizationId, {
-        ...baseStatus(checkedAt), configured: true, installed,
+        ...baseStatus(checkedAt), configured: true, installed, authenticationMode,
         state: "unavailable",
         message: installed
           ? "Não foi possível consultar a franquia agora. A credencial pode precisar ser atualizada."
@@ -103,10 +125,25 @@ export class CodexUsageService {
       await rm(directory, { recursive: true, force: true }).catch(() => undefined);
     }
   }
+
+  private async verifyAuthentication(authJson: unknown): Promise<void> {
+    const directory = await mkdtemp(path.join(tmpdir(), "octob-codex-status-"));
+    await chmod(directory, 0o700);
+    try {
+      await writeFile(path.join(directory, "auth.json"), JSON.stringify(authJson), { mode: 0o600 });
+      await runLoginStatus(
+        resolveBinary(this.config.get<string>("codex.binary", "node_modules/.bin/codex")),
+        directory,
+        this.config.get<number>("codex.statusTimeoutMs", 10_000),
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
 }
 
 function baseStatus(checkedAt: string): CodexStatus {
-  return { id: "codex", name: "Codex CLI", provider: "OpenAI", state: "unavailable", installed: false, configured: false, planType: null, windows: [], checkedAt, message: "" };
+  return { id: "codex", name: "Codex CLI", provider: "OpenAI", state: "unavailable", installed: false, configured: false, authenticationMode: null, planType: null, windows: [], checkedAt, message: "" };
 }
 
 function runAppServer(binary: string, home: string, timeoutMs: number): Promise<{ planType: string | null; rateLimits: unknown }> {
@@ -223,6 +260,27 @@ function verifyBinary(binary: string, timeoutMs: number): Promise<boolean> {
     const timer = setTimeout(() => finish(false), timeoutMs);
     child.once("error", () => finish(false));
     child.once("close", (code) => finish(code === 0));
+  });
+}
+
+function runLoginStatus(binary: string, home: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, ["login", "status"], {
+      cwd: home,
+      env: minimalEnvironment(home),
+      stdio: "ignore",
+    });
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill("SIGKILL");
+      if (error) reject(error); else resolve();
+    };
+    const timer = setTimeout(() => finish(new Error("Codex authentication check timed out")), timeoutMs);
+    child.once("error", (error) => finish(error));
+    child.once("close", (code) => finish(code === 0 ? undefined : new Error("Codex authentication check failed")));
   });
 }
 

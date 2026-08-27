@@ -19,5 +19,19 @@ describe("credentials", () => {
     expect(JSON.parse(decoded.toString("utf8"))).toEqual(plaintext);
   });
   it("uses high entropy webhook tokens and constant-time hashes", () => { const generated = service.generateWebhookSecret(); expect(generated.secret.length).toBeGreaterThan(32); expect(service.matchesWebhookSecret(generated.secret, generated.hash)).toBe(true); expect(service.matchesWebhookSecret(`${generated.secret}x`, generated.hash)).toBe(false); });
-  it("rejects API-key mode Codex auth", () => { expect(() => service.validateCodexAuth({ OPENAI_API_KEY: "secret", tokens: {} })).toThrow(/OPENAI_API_KEY/); });
+  it("normalizes API-key mode without retaining unrelated fields", () => {
+    expect(service.normalizeCodexConfiguration("api_key", undefined, "  sk-test-key  ")).toEqual({
+      mode: "api_key",
+      value: { auth_mode: "apikey", OPENAI_API_KEY: "sk-test-key" },
+    });
+  });
+  it("keeps accepting the legacy ChatGPT authJson payload", () => {
+    const authJson = { auth_mode: "chatgpt", OPENAI_API_KEY: null, tokens: { access_token: "access", refresh_token: "refresh", account_id: "account" } };
+    expect(service.normalizeCodexConfiguration(undefined, authJson, undefined)).toEqual({ mode: "chatgpt", value: authJson });
+  });
+  it("rejects empty, ambiguous, and mixed Codex credentials", () => {
+    expect(() => service.normalizeCodexConfiguration(undefined, undefined, undefined)).toThrow(/exactly one/);
+    expect(() => service.normalizeCodexConfiguration("api_key", {}, "sk-test")).toThrow(/exactly one/);
+    expect(() => service.validateCodexAuth({ auth_mode: "apikey", OPENAI_API_KEY: "sk-test", tokens: {} })).toThrow(/must not include/);
+  });
 });
