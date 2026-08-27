@@ -140,14 +140,14 @@ describe("OrganizationsService", () => {
   });
 
   it("updates the model policy and replaces repository models that are no longer allowed", async () => {
-    const organization = { update: vi.fn().mockResolvedValue({ allowedModels: ["gpt-5.6-sol-high", "gpt-5.6-sol-medium"], defaultModel: "gpt-5.6-sol-medium" }) };
+    const organization = { update: vi.fn().mockResolvedValue({ allowedModels: ["gpt-5.6-sol", "gpt-5.6-luna"], defaultModel: "gpt-5.6-luna" }) };
     const reviewSetting = { updateMany: vi.fn().mockResolvedValue({ count: 2 }) };
     const prisma = { $transaction: vi.fn((callback) => callback({ organization, reviewSetting })) };
     const service = new OrganizationsService(prisma as any, {} as any);
 
-    await expect(service.updateModelPolicy("org-1", { allowedModels: ["gpt-5.6-sol-high", "gpt-5.6-sol-medium"], defaultModel: "gpt-5.6-sol-medium" })).resolves.toEqual({ allowedModels: ["gpt-5.6-sol-high", "gpt-5.6-sol-medium"], defaultModel: "gpt-5.6-sol-medium" });
-    expect(organization.update).toHaveBeenCalledWith({ where: { id: "org-1" }, data: { allowedModels: ["gpt-5.6-sol-high", "gpt-5.6-sol-medium"], defaultModel: "gpt-5.6-sol-medium" }, select: { allowedModels: true, defaultModel: true } });
-    expect(reviewSetting.updateMany).toHaveBeenCalledWith({ where: { repository: { is: { organizationId: "org-1" } }, model: { notIn: ["gpt-5.6-sol-high", "gpt-5.6-sol-medium"] } }, data: { model: "gpt-5.6-sol-medium" } });
+    await expect(service.updateModelPolicy("org-1", { allowedModels: ["gpt-5.6-sol", "gpt-5.6-luna"], defaultModel: "gpt-5.6-luna" })).resolves.toEqual({ allowedModels: ["gpt-5.6-sol", "gpt-5.6-luna"], defaultModel: "gpt-5.6-luna" });
+    expect(organization.update).toHaveBeenCalledWith({ where: { id: "org-1" }, data: { allowedModels: ["gpt-5.6-sol", "gpt-5.6-luna"], defaultModel: "gpt-5.6-luna" }, select: { allowedModels: true, defaultModel: true } });
+    expect(reviewSetting.updateMany).toHaveBeenCalledWith({ where: { repository: { is: { organizationId: "org-1" } }, model: { notIn: ["gpt-5.6-sol", "gpt-5.6-luna"] } }, data: { model: "gpt-5.6-luna" } });
   });
 
   it("rejects updating the model policy when defaultModel is not in allowedModels", async () => {
@@ -156,6 +156,14 @@ describe("OrganizationsService", () => {
 
     await expect(service.updateModelPolicy("org-1", { allowedModels: ["a", "b"], defaultModel: "c" })).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.organization.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects reasoning effort encoded in a model identifier", async () => {
+    const prisma = { $transaction: vi.fn() };
+    const service = new OrganizationsService(prisma as any, {} as any);
+
+    await expect(service.updateModelPolicy("org-1", { allowedModels: ["gpt-5.6-luna-medium"], defaultModel: "gpt-5.6-luna-medium" })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
 
