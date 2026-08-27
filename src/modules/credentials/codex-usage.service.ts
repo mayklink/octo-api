@@ -130,11 +130,13 @@ export class CodexUsageService {
     const directory = await mkdtemp(path.join(tmpdir(), "octob-codex-status-"));
     await chmod(directory, 0o700);
     try {
-      await writeFile(path.join(directory, "auth.json"), JSON.stringify(authJson), { mode: 0o600 });
-      await runLoginStatus(
+      const apiKey = readApiKey(authJson);
+      if (!apiKey) throw new Error("Stored Codex API key is invalid");
+      await runApiKeyLogin(
         resolveBinary(this.config.get<string>("codex.binary", "node_modules/.bin/codex")),
         directory,
         this.config.get<number>("codex.statusTimeoutMs", 10_000),
+        apiKey,
       );
     } finally {
       await rm(directory, { recursive: true, force: true }).catch(() => undefined);
@@ -263,13 +265,14 @@ function verifyBinary(binary: string, timeoutMs: number): Promise<boolean> {
   });
 }
 
-function runLoginStatus(binary: string, home: string, timeoutMs: number): Promise<void> {
+function runApiKeyLogin(binary: string, home: string, timeoutMs: number, apiKey: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, ["login", "status"], {
+    const child = spawn(binary, ["login", "-c", 'cli_auth_credentials_store="file"', "--with-api-key"], {
       cwd: home,
       env: minimalEnvironment(home),
-      stdio: "ignore",
+      stdio: ["pipe", "ignore", "ignore"],
     });
+    child.stdin.end(apiKey);
     let settled = false;
     const finish = (error?: Error) => {
       if (settled) return;
@@ -282,6 +285,13 @@ function runLoginStatus(binary: string, home: string, timeoutMs: number): Promis
     child.once("error", (error) => finish(error));
     child.once("close", (code) => finish(code === 0 ? undefined : new Error("Codex authentication check failed")));
   });
+}
+
+function readApiKey(value: unknown): string | null {
+  const auth = asRecord(value);
+  return (auth?.auth_mode === "apikey" || auth?.auth_mode === "api_key") && typeof auth.OPENAI_API_KEY === "string" && auth.OPENAI_API_KEY
+    ? auth.OPENAI_API_KEY
+    : null;
 }
 
 function minimalEnvironment(home: string): NodeJS.ProcessEnv {

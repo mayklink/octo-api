@@ -32,7 +32,7 @@ Permitir que owner e admin configurem a integração Codex com uma conta ChatGPT
 2. A requisição deve conter exatamente uma credencial coerente com o modo informado.
 3. O modo `api_key` deve exigir uma chave não vazia e armazená-la no envelope criptografado existente.
 4. O modo `chatgpt` deve preservar a validação atual de access token, refresh token e account id.
-5. O worker deve receber apenas a credencial descriptografada do job e aceitar os dois formatos nativos do Codex.
+5. O worker deve autenticar a CLI executando `codex login --with-api-key` e entregar a chave exclusivamente por `stdin`; o modo ChatGPT continua usando o cache `auth.json`.
 6. Renovação de credencial deve continuar restrita a sessões ChatGPT.
 7. O status não deve apresentar ausência de franquia ChatGPT como falha quando o modo for API key.
 8. Respostas HTTP e mensagens de erro nunca devem conter a chave.
@@ -43,7 +43,7 @@ Permitir que owner e admin configurem a integração Codex com uma conta ChatGPT
 - É possível salvar uma API key válida e a resposta contém apenas confirmação, modo e horário.
 - O payload legado com `authJson` continua funcionando.
 - Payload vazio, ambíguo ou incoerente retorna erro 400 seguro.
-- O worker aceita credencial ChatGPT e API key e rejeita formatos incompletos.
+- O worker aceita credencial ChatGPT, executa o login real da CLI para API key e rejeita formatos incompletos.
 - O status de API key informa conexão por consumo sem inventar percentual restante.
 - `pnpm check` passa.
 
@@ -59,4 +59,3 @@ Permitir que owner e admin configurem a integração Codex com uma conta ChatGPT
 - Executar `pnpm check`.
 - Executar os testes de credenciais e status Codex.
 - Verificar que os novos caminhos de log estão configurados para redação.
-

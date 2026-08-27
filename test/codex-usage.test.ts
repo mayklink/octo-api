@@ -70,10 +70,22 @@ readline.on("line", (line) => {
     const root = await mkdtemp(path.join(tmpdir(), "octob-codex-api-key-status-test-"));
     created.push(root);
     const executable = path.join(root, "codex");
+    const loginMarker = path.join(root, "api-key-login.json");
     await writeFile(executable, `#!/usr/bin/env node
 const fs = require("node:fs");
-const auth = JSON.parse(fs.readFileSync(process.env.CODEX_HOME + "/auth.json", "utf8"));
-process.exit(process.argv[2] === "login" && auth.auth_mode === "apikey" && auth.OPENAI_API_KEY === "sk-test" ? 0 : 4);
+let stdin = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { stdin += chunk; });
+process.stdin.on("end", () => {
+  fs.writeFileSync(${JSON.stringify(loginMarker)}, JSON.stringify({
+    command: process.argv.slice(2),
+    receivedViaStdin: stdin === "sk-test",
+    keyInArguments: process.argv.includes("sk-test"),
+    keyInEnvironment: Object.values(process.env).includes("sk-test"),
+    authExistedBeforeLogin: fs.existsSync(process.env.CODEX_HOME + "/auth.json"),
+  }));
+  process.exit(process.argv[2] === "login" && process.argv.includes("--with-api-key") && stdin === "sk-test" ? 0 : 4);
+});
 `, { mode: 0o700 });
     await chmod(executable, 0o700);
     const credentials = { loadIfConfigured: vi.fn().mockResolvedValue({ auth_mode: "apikey", OPENAI_API_KEY: "sk-test" }) } as unknown as CredentialsService;
@@ -85,6 +97,13 @@ process.exit(process.argv[2] === "login" && auth.auth_mode === "apikey" && auth.
       authenticationMode: "api_key",
       planType: null,
       windows: [],
+    });
+    expect(JSON.parse(await readFile(loginMarker, "utf8"))).toEqual({
+      command: ["login", "-c", 'cli_auth_credentials_store="file"', "--with-api-key"],
+      receivedViaStdin: true,
+      keyInArguments: false,
+      keyInEnvironment: false,
+      authExistedBeforeLogin: false,
     });
   });
 });
