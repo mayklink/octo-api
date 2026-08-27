@@ -17,6 +17,10 @@ const validEnvironment = {
 };
 
 describe("HTTP security configuration", () => {
+  it("allows the local and official production frontends by default", () => {
+    expect(validateEnvironment(validEnvironment).CORS_ALLOWED_ORIGINS).toBe("http://localhost:5173,https://octoreview.vercel.app");
+  });
+
   it("accepts explicit CORS origins and rejects wildcards", () => {
     expect(validateEnvironment({ ...validEnvironment, CORS_ALLOWED_ORIGINS: "https://app.example.com" }).CORS_ALLOWED_ORIGINS).toBe("https://app.example.com");
     expect(() => validateEnvironment({ ...validEnvironment, CORS_ALLOWED_ORIGINS: "*" })).toThrow(/CORS_ALLOWED_ORIGINS/);

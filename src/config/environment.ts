@@ -28,7 +28,7 @@ const schema = z.object({
   MAX_REVIEW_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   RETRY_BASE_DELAY_MS: positiveInt.default(30000),
   PUBLIC_API_URL: z.string().url(),
-  CORS_ALLOWED_ORIGINS: z.string().min(1).default("http://localhost:5173"),
+  CORS_ALLOWED_ORIGINS: z.string().min(1).default("http://localhost:5173,https://octoreview.vercel.app"),
   AZURE_DEVOPS_API_VERSION: z.string().default("7.1"),
 });
 
