@@ -19,7 +19,6 @@ que eventos recebidos do Azure DevOps sejam convertidos e encaminhados a ele.
   payload bruto.
 - Entrega antes da confirmação final do evento ao Azure DevOps, permitindo retry
   do Service Hook em caso de falha temporária do Discord.
-- Aplicação automática das migrations pendentes antes da API iniciar em produção.
 - Cobertura automatizada do cadastro, transformação e fluxo de entrega.
 
 ## Fora do escopo
@@ -51,9 +50,6 @@ que eventos recebidos do Azure DevOps sejam convertidos e encaminhados a ele.
   webhook cadastrado.
 - Falha de entrega Discord impede marcar o evento como processado.
 - A suíte automatizada cobre os casos acima e `pnpm check` passa.
-- O comando de inicialização de produção executa `prisma migrate deploy` antes
-  de atender requisições, inclusive quando a plataforma sobrescreve o CMD do
-  Dockerfile.
 
 ## Restrições
 
