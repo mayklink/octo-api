@@ -90,7 +90,7 @@ export class RepositoriesService {
     return this.prisma.repository.findUnique({ where: { id }, include: { settings: true } });
   }
 
-  private webhookUrl(id: string, secret: string) { const url = new URL("/webhooks/azure-devops", this.config.getOrThrow<string>("app.publicUrl")); url.searchParams.set("repository", id); url.searchParams.set("token", secret); return url.toString(); }
+  private webhookUrl(id: string, secret: string) { const url = new URL("/webhooks/azure-devops", this.config.getOrThrow<string>("app.publicUrl")); url.searchParams.set("repository", id); url.searchParams.set("token", secret); url.searchParams.set("trigger", "source"); return url.toString(); }
 }
 
 const publicRepositorySelect = { id: true, organizationId: true, name: true, provider: true, azureOrganization: true, azureProjectId: true, azureRepositoryId: true, cloneUrl: true, status: true, webhookSecretVersion: true, createdAt: true, updatedAt: true } as const;

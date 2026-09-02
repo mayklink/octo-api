@@ -70,6 +70,19 @@ describe("WebhooksService", () => {
     expect(reviews.create).not.toHaveBeenCalled();
   });
 
+  it("does not create a review for an unmarked pull request update", async () => {
+    const { service, reviews } = buildService();
+    const result = await service.azureDevOps("repo-1", "token", buildBody({ eventType: "git.pullrequest.updated" }));
+    expect(result).toEqual({ accepted: true, ignored: true });
+    expect(reviews.create).not.toHaveBeenCalled();
+  });
+
+  it("creates a review for a source-branch pull request update", async () => {
+    const { service, reviews } = buildService();
+    await service.azureDevOps("repo-1", "token", buildBody({ eventType: "git.pullrequest.updated" }), true);
+    expect(reviews.create).toHaveBeenCalledOnce();
+  });
+
   it("accepts non-pull-request Azure events so they can be forwarded to Discord", async () => {
     const { service, discord } = buildService();
     const result = await service.azureDevOps("repo-1", "token", buildBody({ eventType: "git.push", resource: { repository: { id: "azure-repo-1", project: { id: "azure-project-1" } } } }));

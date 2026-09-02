@@ -10,7 +10,7 @@ import { DiscordWebhookService } from "../discord/discord-webhook.service";
 @Injectable()
 export class WebhooksService {
   constructor(private readonly prisma: PrismaService, private readonly credentials: CredentialsService, private readonly repositories: RepositoriesService, private readonly reviews: ReviewsService, private readonly discord: DiscordWebhookService) {}
-  async azureDevOps(repositoryId: string, token: string, body: unknown) {
+  async azureDevOps(repositoryId: string, token: string, body: unknown, reviewSourcePush = false) {
     const repository = await this.repositories.findByIdWithSettings(repositoryId);
     if (!repository) throw new NotFoundException("Webhook repository not found");
     if (!repository.webhookSecretHash || !this.credentials.matchesWebhookSecret(token, repository.webhookSecretHash)) throw new ForbiddenException("Invalid webhook token");
@@ -33,7 +33,8 @@ export class WebhooksService {
         pullRequestUrl: event.pullRequestUrl, author: event.author, occurredAt: event.occurredAt, message: event.message,
         reviewers: event.reviewers,
       });
-      if (!["git.pullrequest.created", "git.pullrequest.updated"].includes(event.type) || !repository.settings?.autoReview || !event.pullRequestId) {
+      const shouldReview = event.type === "git.pullrequest.created" || (event.type === "git.pullrequest.updated" && reviewSourcePush);
+      if (!shouldReview || !repository.settings?.autoReview || !event.pullRequestId) {
         await this.prisma.webhookEvent.update({ where: { id: stored.id }, data: { processedAt: new Date(), processingAt: null } });
         return { accepted: true, ignored: true };
       }

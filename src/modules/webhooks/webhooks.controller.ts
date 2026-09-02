@@ -7,5 +7,5 @@ import { WebhooksService } from "./webhooks.service";
 export class WebhooksController {
   constructor(private readonly webhooks: WebhooksService) {}
   @Public() @Post("azure-devops") @HttpCode(202)
-  azureDevOps(@Query() query: AzureWebhookQueryDto, @Body() body: unknown) { return this.webhooks.azureDevOps(query.repository, query.token, body); }
+  azureDevOps(@Query() query: AzureWebhookQueryDto, @Body() body: unknown) { return this.webhooks.azureDevOps(query.repository, query.token, body, query.trigger === "source"); }
 }
