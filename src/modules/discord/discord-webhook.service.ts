@@ -1,6 +1,7 @@
 import { BadGatewayException, BadRequestException, Injectable } from "@nestjs/common";
-import { CredentialKind } from "@prisma/client";
+import { CredentialKind, Prisma } from "@prisma/client";
 import { CredentialsService } from "../credentials/credentials.service";
+import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
 export type AzureDevOpsDiscordEvent = {
   eventType: string;
@@ -17,7 +18,7 @@ export type AzureDevOpsDiscordEvent = {
 
 @Injectable()
 export class DiscordWebhookService {
-  constructor(private readonly credentials: CredentialsService) {}
+  constructor(private readonly credentials: CredentialsService, private readonly prisma: PrismaService) {}
 
   normalizeWebhookUrl(value: string): string {
     let url: URL;
@@ -30,6 +31,7 @@ export class DiscordWebhookService {
   }
 
   async configure(organizationId: string, repositoryId: string, webhookUrl: string): Promise<void> {
+    await this.ensureDiscordCredentialKind();
     await this.credentials.store(organizationId, repositoryId, CredentialKind.discord_webhook, { url: this.normalizeWebhookUrl(webhookUrl) });
   }
 
@@ -49,6 +51,10 @@ export class DiscordWebhookService {
     }
     if (!response.ok) throw new BadGatewayException(`Discord webhook returned HTTP ${response.status}`);
     return true;
+  }
+
+  private ensureDiscordCredentialKind(): Promise<number> {
+    return this.prisma.$executeRaw(Prisma.sql`ALTER TYPE "CredentialKind" ADD VALUE IF NOT EXISTS 'discord_webhook'`);
   }
 }
 

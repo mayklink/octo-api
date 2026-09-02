@@ -15,6 +15,9 @@ que eventos recebidos do Azure DevOps sejam convertidos e encaminhados a ele.
 
 - Cadastro autenticado da URL de Incoming Webhook do Discord por repositório.
 - Armazenamento cifrado da URL e validação de que ela pertence ao Discord.
+- Compatibilidade com bancos legados cuja migration do novo tipo de credencial
+  ainda não tenha sido registrada: o cadastro inclui o valor do enum de forma
+  idempotente antes da gravação.
 - Conversão de eventos Azure DevOps para uma mensagem Discord sem encaminhar o
   payload bruto.
 - Entrega antes da confirmação final do evento ao Azure DevOps, permitindo retry

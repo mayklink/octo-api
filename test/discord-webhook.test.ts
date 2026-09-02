@@ -4,7 +4,7 @@ import { DiscordWebhookService, toDiscordPayload } from "../src/modules/discord/
 
 describe("DiscordWebhookService", () => {
   it("accepts only HTTPS Discord incoming webhook URLs", () => {
-    const service = new DiscordWebhookService({} as never);
+    const service = new DiscordWebhookService({} as never, {} as never);
     expect(service.normalizeWebhookUrl("https://discord.com/api/webhooks/1234567890/token-value")).toBe("https://discord.com/api/webhooks/1234567890/token-value");
     expect(() => service.normalizeWebhookUrl("https://example.com/api/webhooks/123/token")).toThrow(BadRequestException);
     expect(() => service.normalizeWebhookUrl("http://discord.com/api/webhooks/123/token")).toThrow(BadRequestException);
@@ -12,8 +12,10 @@ describe("DiscordWebhookService", () => {
 
   it("stores only a normalized Discord URL through the encrypted credentials service", async () => {
     const credentials = { store: vi.fn().mockResolvedValue(undefined) };
-    const service = new DiscordWebhookService(credentials as never);
+    const prisma = { $executeRaw: vi.fn().mockResolvedValue(0) };
+    const service = new DiscordWebhookService(credentials as never, prisma as never);
     await service.configure("org-1", "repo-1", "https://discord.com/api/webhooks/1234567890/token-value");
+    expect(prisma.$executeRaw).toHaveBeenCalledOnce();
     expect(credentials.store).toHaveBeenCalledWith("org-1", "repo-1", "discord_webhook", { url: "https://discord.com/api/webhooks/1234567890/token-value" });
   });
 
@@ -26,7 +28,7 @@ describe("DiscordWebhookService", () => {
 
   it("posts the converted payload to the configured Discord webhook", async () => {
     const credentials = { loadIfConfigured: vi.fn().mockResolvedValue({ url: "https://discord.com/api/webhooks/1234567890/token-value" }) };
-    const service = new DiscordWebhookService(credentials as never);
+    const service = new DiscordWebhookService(credentials as never, {} as never);
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
     await expect(service.publishAzureDevOpsEvent("org-1", "repo-1", { eventType: "git.push", eventId: "evt-1", repositoryName: "api" })).resolves.toBe(true);
