@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { WebhooksService } from "../src/modules/webhooks/webhooks.service";
 
-const baseRepository = { id: "repo-1", organizationId: "org-1", azureRepositoryId: "azure-repo-1", azureProjectId: "azure-project-1", webhookSecretHash: "hash", settings: { autoReview: true } };
+const baseRepository = { id: "repo-1", name: "repo-1", organizationId: "org-1", azureRepositoryId: "azure-repo-1", azureProjectId: "azure-project-1", webhookSecretHash: "hash", settings: { autoReview: true } };
 
 function buildBody(overrides: Record<string, unknown> = {}) {
   return {
@@ -18,14 +18,15 @@ function buildService(options: { repository?: unknown; tokenMatches?: boolean; s
       findUnique: vi.fn().mockResolvedValue(options.storedEvent ?? null),
       create: vi.fn().mockImplementation(({ data }) => ({ id: "stored-1", processedAt: null, ...data })),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      update: vi.fn().mockImplementation(({ data }) => ({ id: "stored-1", ...data })),
+      update: vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: "stored-1", ...data })),
     },
   };
   const credentials = { matchesWebhookSecret: vi.fn().mockReturnValue(options.tokenMatches ?? true) };
   const repositories = { findByIdWithSettings: vi.fn().mockResolvedValue(options.repository === undefined ? baseRepository : options.repository) };
   const reviews = { create: vi.fn().mockResolvedValue({ id: "job-1" }), findByCorrelationId: vi.fn().mockResolvedValue(null) };
-  const service = new WebhooksService(prisma as any, credentials as any, repositories as any, reviews as any);
-  return { service, prisma, credentials, repositories, reviews };
+  const discord = { publishAzureDevOpsEvent: vi.fn().mockResolvedValue(false) };
+  const service = new WebhooksService(prisma as any, credentials as any, repositories as any, reviews as any, discord as any);
+  return { service, prisma, credentials, repositories, reviews, discord };
 }
 
 describe("WebhooksService", () => {
@@ -47,11 +48,12 @@ describe("WebhooksService", () => {
   });
 
   it("creates a review job for a new qualifying pull request event", async () => {
-    const { service, reviews, prisma } = buildService();
+    const { service, reviews, prisma, discord } = buildService();
     const result = await service.azureDevOps("repo-1", "token", buildBody());
     expect(reviews.create).toHaveBeenCalledWith("org-1", { repositoryId: "repo-1", pullRequestId: "42" }, expect.any(String), "webhook");
     expect(prisma.webhookEvent.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reviewJobId: "job-1" }) }));
     expect(result).toEqual({ accepted: true, jobId: "job-1" });
+    expect(discord.publishAzureDevOpsEvent).toHaveBeenCalledWith("org-1", "repo-1", expect.objectContaining({ eventType: "git.pullrequest.created", repositoryName: "repo-1", pullRequestId: "42" }));
   });
 
   it("short-circuits as a duplicate when the event was already processed", async () => {
@@ -66,6 +68,20 @@ describe("WebhooksService", () => {
     const result = await service.azureDevOps("repo-1", "token", buildBody());
     expect(result).toEqual({ accepted: true, ignored: true });
     expect(reviews.create).not.toHaveBeenCalled();
+  });
+
+  it("accepts non-pull-request Azure events so they can be forwarded to Discord", async () => {
+    const { service, discord } = buildService();
+    const result = await service.azureDevOps("repo-1", "token", buildBody({ eventType: "git.push", resource: { repository: { id: "azure-repo-1", project: { id: "azure-project-1" } } } }));
+    expect(result).toEqual({ accepted: true, ignored: true });
+    expect(discord.publishAzureDevOpsEvent).toHaveBeenCalledWith("org-1", "repo-1", expect.objectContaining({ eventType: "git.push" }));
+  });
+
+  it("keeps the event available for retry when Discord delivery fails", async () => {
+    const { service, prisma, discord } = buildService();
+    discord.publishAzureDevOpsEvent.mockRejectedValue(new Error("Discord unavailable"));
+    await expect(service.azureDevOps("repo-1", "token", buildBody())).rejects.toThrow("Discord unavailable");
+    expect(prisma.webhookEvent.update).toHaveBeenCalledWith(expect.objectContaining({ data: { processingAt: null } }));
   });
 
   it("rejects when the event's repository identity does not match the URL repository", async () => {

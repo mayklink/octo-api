@@ -18,6 +18,7 @@ import { ReviewsModule } from "./modules/reviews/reviews.module";
 import { MessagingModule } from "./modules/messaging/messaging.module";
 import { WebhooksModule } from "./modules/webhooks/webhooks.module";
 import { ContractsModule } from "./modules/contracts/contracts.module";
+import { DiscordModule } from "./modules/discord/discord.module";
 import { WebhookRateLimitMiddleware } from "./modules/webhooks/webhook-rate-limit.middleware";
 
 @Module({
@@ -49,6 +50,7 @@ import { WebhookRateLimitMiddleware } from "./modules/webhooks/webhook-rate-limi
     RepositoriesModule,
     ReviewsModule,
     MessagingModule,
+    DiscordModule,
     WebhooksModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: SupabaseAuthGuard }],

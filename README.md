@@ -63,7 +63,8 @@ As URLs do frontend devem ser cadastradas em **Authentication → URL Configurat
 3. Criar um repositório com `POST /repositories`.
 4. Enviar o PAT em `PUT /repositories/:id/integrations/azure-devops`.
 5. Copiar a `webhookUrl` retornada e configurá-la no Service Hook do Azure DevOps.
-6. Enviar JWT Supabase e `X-Organization-Id` nas rotas protegidas.
+6. Opcionalmente, cadastrar o Incoming Webhook do Discord com `PUT /repositories/:id/integrations/discord-webhook`.
+7. Enviar JWT Supabase e `X-Organization-Id` nas rotas protegidas.
 
 O token do webhook aparece na URL somente durante criação/rotação. A aplicação persiste apenas SHA-256 e remove `token` dos logs estruturados.
 
@@ -76,6 +77,7 @@ O token do webhook aparece na URL somente durante criação/rotação. A aplica�
 | GET/POST | `/repositories` | Listar e cadastrar repositórios |
 | PATCH | `/repositories/:id` | Alterar nome/estado |
 | PUT | `/repositories/:id/integrations/azure-devops` | Validar e rotacionar PAT |
+| PUT | `/repositories/:id/integrations/discord-webhook` | Cadastrar Incoming Webhook do Discord cifrado |
 | POST | `/repositories/:id/webhook-secret/rotate` | Rotacionar URL secreta |
 | PUT | `/organizations/:id/integrations/codex` | Armazenar auth.json cifrado |
 | GET/POST | `/review-jobs` | Listar/criar reviews |

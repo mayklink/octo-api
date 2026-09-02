@@ -4,12 +4,13 @@ import { CredentialKind, Prisma, RepositoryStatus } from "@prisma/client";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 import { AzureDevOpsAdapter } from "../azure-devops/azure-devops.adapter";
 import { CredentialsService } from "../credentials/credentials.service";
+import { DiscordWebhookService } from "../discord/discord-webhook.service";
 import { OrganizationsService } from "../organizations/organizations.service";
 import type { CreateRepositoryDto, DiscoverAzureRepositoriesDto, UpdateRepositoryDto } from "./repositories.dto";
 
 @Injectable()
 export class RepositoriesService {
-  constructor(private readonly prisma: PrismaService, private readonly credentials: CredentialsService, private readonly azure: AzureDevOpsAdapter, private readonly config: ConfigService, private readonly organizations: OrganizationsService) {}
+  constructor(private readonly prisma: PrismaService, private readonly credentials: CredentialsService, private readonly azure: AzureDevOpsAdapter, private readonly config: ConfigService, private readonly organizations: OrganizationsService, private readonly discord: DiscordWebhookService) {}
 
   list(organizationId: string) { return this.prisma.repository.findMany({ where: { organizationId }, orderBy: { createdAt: "desc" }, select: publicRepositorySelect }); }
 
@@ -34,6 +35,12 @@ export class RepositoriesService {
     const { secret, hash } = this.credentials.generateWebhookSecret();
     const updated = await this.prisma.repository.update({ where: { id }, data: { name: validated.name, cloneUrl: validated.cloneUrl, status: "active", webhookSecretHash: hash, webhookSecretVersion: { increment: 1 } }, select: publicRepositorySelect });
     return { ...updated, webhookUrl: this.webhookUrl(id, secret) };
+  }
+
+  async configureDiscordWebhook(organizationId: string, id: string, webhookUrl: string) {
+    await this.get(organizationId, id);
+    await this.discord.configure(organizationId, id, webhookUrl);
+    return { configured: true, validatedAt: new Date().toISOString() };
   }
 
   async discoverAzureRepositories(organizationId: string, dto: DiscoverAzureRepositoriesDto) {

@@ -28,6 +28,7 @@ enum RepositoryStatus {
 enum CredentialKind {
   azure_devops_pat
   codex_auth
+  discord_webhook
 }
 enum JobSource {
   manual

@@ -6,7 +6,7 @@ describe("RepositoriesService model policy seeding", () => {
     const created = { id: "repo-1", organizationId: "org-1" };
     const prisma = { repository: { create: vi.fn().mockResolvedValue(created) } };
     const organizations = { resolveModelPolicy: vi.fn().mockResolvedValue({ allowedModels: ["a", "b"], defaultModel: "b" }) };
-    const service = new RepositoriesService(prisma as any, {} as any, {} as any, {} as any, organizations as any);
+    const service = new RepositoriesService(prisma as any, {} as any, {} as any, {} as any, organizations as any, {} as any);
 
     await expect(service.create("org-1", { name: "repo", azureOrganization: "azo", azureProjectId: "proj", azureRepositoryId: "repoid", cloneUrl: "https://example.com" } as any)).resolves.toEqual(created);
 

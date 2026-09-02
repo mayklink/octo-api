@@ -12,6 +12,7 @@ export class UpdateRepositoryDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 export class ConfigureAzureCredentialDto { @IsOptional() @IsString() @MinLength(1) @MaxLength(512) pat?: string; }
+export class ConfigureDiscordWebhookDto { @IsString() @MinLength(1) @MaxLength(2048) webhookUrl!: string; }
 export class RepositoryIdDto { @IsUUID() repositoryId!: string; }
 export class DiscoverAzureRepositoriesDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(160) azureOrganization?: string;

@@ -1,0 +1,36 @@
+import { BadRequestException } from "@nestjs/common";
+import { describe, expect, it, vi } from "vitest";
+import { DiscordWebhookService, toDiscordPayload } from "../src/modules/discord/discord-webhook.service";
+
+describe("DiscordWebhookService", () => {
+  it("accepts only HTTPS Discord incoming webhook URLs", () => {
+    const service = new DiscordWebhookService({} as never);
+    expect(service.normalizeWebhookUrl("https://discord.com/api/webhooks/1234567890/token-value")).toBe("https://discord.com/api/webhooks/1234567890/token-value");
+    expect(() => service.normalizeWebhookUrl("https://example.com/api/webhooks/123/token")).toThrow(BadRequestException);
+    expect(() => service.normalizeWebhookUrl("http://discord.com/api/webhooks/123/token")).toThrow(BadRequestException);
+  });
+
+  it("stores only a normalized Discord URL through the encrypted credentials service", async () => {
+    const credentials = { store: vi.fn().mockResolvedValue(undefined) };
+    const service = new DiscordWebhookService(credentials as never);
+    await service.configure("org-1", "repo-1", "https://discord.com/api/webhooks/1234567890/token-value");
+    expect(credentials.store).toHaveBeenCalledWith("org-1", "repo-1", "discord_webhook", { url: "https://discord.com/api/webhooks/1234567890/token-value" });
+  });
+
+  it("converts Azure DevOps data into a Discord-safe embed", () => {
+    expect(toDiscordPayload({ eventType: "git.pullrequest.created", eventId: "evt-1", repositoryName: "api", projectName: "Octob", pullRequestId: "12", pullRequestTitle: "Add Discord", author: "May", message: "@everyone no mentions" })).toMatchObject({
+      allowed_mentions: { parse: [] },
+      embeds: [{ title: "git.pullrequest.created", description: "@everyone no mentions", fields: expect.arrayContaining([{ name: "Repositório", value: "api", inline: true }]) }],
+    });
+  });
+
+  it("posts the converted payload to the configured Discord webhook", async () => {
+    const credentials = { loadIfConfigured: vi.fn().mockResolvedValue({ url: "https://discord.com/api/webhooks/1234567890/token-value" }) };
+    const service = new DiscordWebhookService(credentials as never);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(service.publishAzureDevOpsEvent("org-1", "repo-1", { eventType: "git.push", eventId: "evt-1", repositoryName: "api" })).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith("https://discord.com/api/webhooks/1234567890/token-value", expect.objectContaining({ method: "POST" }));
+    vi.unstubAllGlobals();
+  });
+});
