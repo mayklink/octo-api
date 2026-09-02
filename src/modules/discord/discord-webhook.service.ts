@@ -10,8 +10,10 @@ export type AzureDevOpsDiscordEvent = {
   projectName?: string;
   pullRequestId?: string;
   pullRequestTitle?: string;
+  pullRequestDescription?: string;
   pullRequestUrl?: string;
   author?: string;
+  reviewers?: string[];
   occurredAt?: string;
   message?: string;
 };
@@ -68,7 +70,9 @@ export function toDiscordPayload(event: AzureDevOpsDiscordEvent) {
     { name: "Repositório", value: event.repositoryName, inline: true },
     ...(event.projectName ? [{ name: "Projeto", value: event.projectName, inline: true }] : []),
     ...(event.pullRequestId ? [{ name: "Pull request", value: `#${event.pullRequestId}${event.pullRequestTitle ? ` — ${event.pullRequestTitle}` : ""}`, inline: false }] : []),
+    ...(event.pullRequestDescription ? [{ name: "Resumo", value: summarize(event.pullRequestDescription), inline: false }] : []),
     ...(event.author ? [{ name: "Autor", value: event.author, inline: true }] : []),
+    ...(event.reviewers?.length ? [{ name: "Revisores", value: event.reviewers.join("\n"), inline: false }] : []),
   ].map((field) => ({ ...field, value: truncate(field.value, 1024) }));
   return {
     allowed_mentions: { parse: [] },
@@ -84,4 +88,5 @@ export function toDiscordPayload(event: AzureDevOpsDiscordEvent) {
 }
 
 function truncate(value: string, length: number): string { return value.length <= length ? value : `${value.slice(0, length - 1)}…`; }
+function summarize(value: string): string { return truncate(value.replace(/\s+/g, " ").trim(), 360); }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

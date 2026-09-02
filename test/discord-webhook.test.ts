@@ -35,4 +35,14 @@ describe("DiscordWebhookService", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://discord.com/api/webhooks/1234567890/token-value", expect.objectContaining({ method: "POST" }));
     vi.unstubAllGlobals();
   });
+
+  it("includes pull request reviewers in the Discord embed", () => {
+    const payload = toDiscordPayload({ eventType: "git.pullrequest.updated", eventId: "evt-1", repositoryName: "api", reviewers: ["Maroli", "Ana"] });
+    expect(payload.embeds[0].fields).toContainEqual({ name: "Revisores", value: "Maroli\nAna", inline: false });
+  });
+
+  it("limits a pull request description to a compact summary", () => {
+    const payload = toDiscordPayload({ eventType: "git.pullrequest.updated", eventId: "evt-1", repositoryName: "api", pullRequestId: "12", pullRequestTitle: "Fix dates", pullRequestDescription: "  Corrige\n as datas   do relatório.  " });
+    expect(payload.embeds[0].fields).toContainEqual({ name: "Resumo", value: "Corrige as datas do relatório.", inline: false });
+  });
 });

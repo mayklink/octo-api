@@ -29,8 +29,9 @@ export class WebhooksService {
     try {
       await this.discord.publishAzureDevOpsEvent(repository.organizationId, repositoryId, {
         eventType: event.type, eventId: event.id, repositoryName: event.repositoryName ?? repository.name,
-        projectName: event.projectName, pullRequestId: event.pullRequestId, pullRequestTitle: event.pullRequestTitle,
+        projectName: event.projectName, pullRequestId: event.pullRequestId, pullRequestTitle: event.pullRequestTitle, pullRequestDescription: event.pullRequestDescription,
         pullRequestUrl: event.pullRequestUrl, author: event.author, occurredAt: event.occurredAt, message: event.message,
+        reviewers: event.reviewers,
       });
       if (!["git.pullrequest.created", "git.pullrequest.updated"].includes(event.type) || !repository.settings?.autoReview || !event.pullRequestId) {
         await this.prisma.webhookEvent.update({ where: { id: stored.id }, data: { processedAt: new Date(), processingAt: null } });
@@ -50,26 +51,39 @@ export class WebhooksService {
 
 function parseAzureEvent(value: unknown) {
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.eventType !== "string" || !isRecord(value.resource)) throw new UnprocessableEntityException("Invalid Azure DevOps webhook payload");
-  const repository = isRecord(value.resource.repository) ? value.resource.repository : undefined;
+  const pullRequest = isRecord(value.resource.pullRequest) ? value.resource.pullRequest : value.resource;
+  const repository = isRecord(pullRequest.repository) ? pullRequest.repository : undefined;
   if (!repository || typeof repository.id !== "string") throw new UnprocessableEntityException("Webhook repository identity is missing");
   const project = isRecord(repository.project) ? repository.project : undefined;
-  const pr = value.resource.pullRequestId;
-  const createdBy = isRecord(value.resource.createdBy) ? value.resource.createdBy : undefined;
+  const pr = pullRequest.pullRequestId;
+  const createdBy = isRecord(pullRequest.createdBy) ? pullRequest.createdBy : undefined;
+  const comment = isRecord(value.resource.comment) ? value.resource.comment : undefined;
+  const commentAuthor = isRecord(comment?.author) ? comment.author : undefined;
   return {
     id: value.id.slice(0, 256), type: value.eventType, azureRepositoryId: repository.id,
     projectId: typeof project?.id === "string" ? project.id : undefined,
     repositoryName: typeof repository.name === "string" ? repository.name : undefined,
     projectName: typeof project?.name === "string" ? project.name : undefined,
     pullRequestId: typeof pr === "number" || typeof pr === "string" ? String(pr) : undefined,
-    pullRequestTitle: typeof value.resource.title === "string" ? value.resource.title : undefined,
-    pullRequestUrl: typeof value.resource.url === "string" ? value.resource.url : undefined,
-    author: typeof createdBy?.displayName === "string" ? createdBy.displayName : undefined,
+    pullRequestTitle: typeof pullRequest.title === "string" ? pullRequest.title : undefined,
+    pullRequestDescription: typeof pullRequest.description === "string" ? pullRequest.description : undefined,
+    pullRequestUrl: typeof pullRequest.url === "string" ? pullRequest.url : undefined,
+    author: typeof commentAuthor?.displayName === "string" ? commentAuthor.displayName : typeof createdBy?.displayName === "string" ? createdBy.displayName : undefined,
+    reviewers: reviewers(pullRequest.reviewers),
     occurredAt: typeof value.createdDate === "string" ? value.createdDate : undefined,
     message: azureMessage(value), correlationId: typeof value.correlationId === "string" ? value.correlationId : undefined,
   };
 }
+function reviewers(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const names = value
+    .filter(isRecord)
+    .map((reviewer) => reviewer.displayName)
+    .filter((name): name is string => typeof name === "string" && name.trim().length > 0);
+  return names.length ? [...new Set(names)] : undefined;
+}
 function azureMessage(value: Record<string, unknown>): string | undefined {
-  for (const key of ["detailedMessage", "message"]) {
+  for (const key of ["message", "detailedMessage"]) {
     const message = value[key];
     if (isRecord(message) && typeof message.text === "string") return message.text;
   }

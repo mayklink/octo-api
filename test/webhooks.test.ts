@@ -49,11 +49,11 @@ describe("WebhooksService", () => {
 
   it("creates a review job for a new qualifying pull request event", async () => {
     const { service, reviews, prisma, discord } = buildService();
-    const result = await service.azureDevOps("repo-1", "token", buildBody());
+    const result = await service.azureDevOps("repo-1", "token", buildBody({ resource: { repository: { id: "azure-repo-1", project: { id: "azure-project-1" } }, pullRequestId: 42, reviewers: [{ displayName: "Maroli" }, { displayName: "Ana" }, { displayName: "Maroli" }] } }));
     expect(reviews.create).toHaveBeenCalledWith("org-1", { repositoryId: "repo-1", pullRequestId: "42" }, expect.any(String), "webhook");
     expect(prisma.webhookEvent.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reviewJobId: "job-1" }) }));
     expect(result).toEqual({ accepted: true, jobId: "job-1" });
-    expect(discord.publishAzureDevOpsEvent).toHaveBeenCalledWith("org-1", "repo-1", expect.objectContaining({ eventType: "git.pullrequest.created", repositoryName: "repo-1", pullRequestId: "42" }));
+    expect(discord.publishAzureDevOpsEvent).toHaveBeenCalledWith("org-1", "repo-1", expect.objectContaining({ eventType: "git.pullrequest.created", repositoryName: "repo-1", pullRequestId: "42", reviewers: ["Maroli", "Ana"] }));
   });
 
   it("short-circuits as a duplicate when the event was already processed", async () => {
@@ -88,5 +88,19 @@ describe("WebhooksService", () => {
     const { service } = buildService();
     const body = buildBody({ resource: { repository: { id: "some-other-repo" }, pullRequestId: 42 } });
     await expect(service.azureDevOps("repo-1", "token", body)).rejects.toThrow(/does not match URL repository/);
+  });
+
+  it("uses Azure's concise event message instead of the pull request detail", async () => {
+    const { service, discord } = buildService();
+    await service.azureDevOps("repo-1", "token", buildBody({ message: { text: "Mayk changed the reviewer list" }, detailedMessage: { text: "Long pull request description" } }));
+    expect(discord.publishAzureDevOpsEvent).toHaveBeenCalledWith("org-1", "repo-1", expect.objectContaining({ message: "Mayk changed the reviewer list" }));
+  });
+
+  it("forwards the author of a pull request comment", async () => {
+    const { service, discord } = buildService();
+    const body = buildBody({ eventType: "ms.vss-code.git-pullrequest-comment-event", resource: { comment: { author: { displayName: "Maroli" } }, pullRequest: { repository: { id: "azure-repo-1", project: { id: "azure-project-1" } }, pullRequestId: 42, title: "Fix dates", description: "Corrects the report dates" } } });
+    const result = await service.azureDevOps("repo-1", "token", body);
+    expect(result).toEqual({ accepted: true, ignored: true });
+    expect(discord.publishAzureDevOpsEvent).toHaveBeenCalledWith("org-1", "repo-1", expect.objectContaining({ eventType: "ms.vss-code.git-pullrequest-comment-event", author: "Maroli", pullRequestId: "42", pullRequestDescription: "Corrects the report dates" }));
   });
 });
