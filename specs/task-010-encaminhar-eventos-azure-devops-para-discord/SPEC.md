@@ -51,8 +51,9 @@ que eventos recebidos do Azure DevOps sejam convertidos e encaminhados a ele.
   webhook cadastrado.
 - Falha de entrega Discord impede marcar o evento como processado.
 - A suíte automatizada cobre os casos acima e `pnpm check` passa.
-- O container de produção executa `prisma migrate deploy` antes de atender
-  requisições.
+- O comando de inicialização de produção executa `prisma migrate deploy` antes
+  de atender requisições, inclusive quando a plataforma sobrescreve o CMD do
+  Dockerfile.
 
 ## Restrições
 
