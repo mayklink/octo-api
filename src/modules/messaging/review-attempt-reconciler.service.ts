@@ -4,6 +4,9 @@ import { Prisma } from "@prisma/client";
 import { PinoLogger } from "nestjs-pino";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
+const ACTIVE_ATTEMPT_STATUSES = ["created", "published", "running", "retry_wait"] as const;
+const ACTIVE_JOB_STATUSES = ["created", "queued", "running", "retry_wait"] as const;
+
 @Injectable()
 export class ReviewAttemptReconcilerService {
   private running = false;
@@ -17,16 +20,31 @@ export class ReviewAttemptReconcilerService {
     if (this.running) return;
     this.running = true;
     try {
+      const now = new Date();
       const expired = await this.prisma.reviewJobAttempt.findMany({
-        where: { status: { in: ["published", "running"] }, deadlineAt: { lt: new Date() } },
+        where: { status: { in: [...ACTIVE_ATTEMPT_STATUSES] }, deadlineAt: { lt: now } },
         take: 10,
       });
       for (const attempt of expired) {
-        await this.prisma.$transaction([
-          this.prisma.reviewJobAttempt.update({ where: { id: attempt.id }, data: { status: "timed_out", failureCode: "REVIEW_TIMEOUT", failureCategory: "timeout", failureMessage: "Review deadline elapsed", completedAt: new Date() } }),
-          this.prisma.reviewJob.update({ where: { id: attempt.reviewJobId }, data: { status: "failed", completedAt: new Date() } }),
-          this.prisma.reviewPublication.upsert({ where: { dedupKey: `${attempt.reviewJobId}:status` }, update: { status: "pending", lastError: null }, create: { dedupKey: `${attempt.reviewJobId}:status`, reviewJobId: attempt.reviewJobId, kind: "status" } }),
-        ]).catch((error: unknown) => {
+        await this.prisma.$transaction(async (tx) => {
+          const claimed = await tx.reviewJobAttempt.updateMany({
+            where: { id: attempt.id, status: { in: [...ACTIVE_ATTEMPT_STATUSES] }, deadlineAt: { lt: now } },
+            data: { status: "timed_out", failureCode: "REVIEW_TIMEOUT", failureCategory: "timeout", failureMessage: "Review deadline elapsed", nextRetryAt: null, completedAt: now },
+          });
+          if (!claimed.count) return;
+
+          const completed = await tx.reviewJob.updateMany({
+            where: { id: attempt.reviewJobId, currentAttempt: attempt.attempt, status: { in: [...ACTIVE_JOB_STATUSES] } },
+            data: { status: "failed", completedAt: now },
+          });
+          if (!completed.count) return;
+
+          await tx.reviewPublication.upsert({
+            where: { dedupKey: `${attempt.reviewJobId}:status` },
+            update: { status: "pending", lastError: null },
+            create: { dedupKey: `${attempt.reviewJobId}:status`, reviewJobId: attempt.reviewJobId, kind: "status" },
+          });
+        }).catch((error: unknown) => {
           if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
         });
       }
