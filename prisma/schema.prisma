@@ -166,6 +166,7 @@ model ReviewSetting {
   severityThreshold String? @map("severity_threshold")
   model            String
   autoReview       Boolean @default(true) @map("auto_review")
+  targetBranches   String[] @default(["developer"]) @map("target_branches")
   policyVersion    String @default("static-review-v2") @map("policy_version")
   maxAttempts      Int @default(3) @map("max_attempts")
   createdAt        DateTime @default(now()) @map("created_at")

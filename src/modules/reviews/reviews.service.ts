@@ -10,6 +10,7 @@ import type { EncryptedCredential, ReviewRequestedV2, Severity } from "../contra
 import { CredentialsService } from "../credentials/credentials.service";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { RepositoriesService } from "../repositories/repositories.service";
+import { isTargetBranchAllowed, normalizeTargetBranches } from "./target-branches";
 import type { CreateReviewJobDto, UpdateReviewSettingsDto } from "./reviews.dto";
 
 type BuildRequestArgs = {
@@ -42,6 +43,7 @@ export class ReviewsService {
     if (!settings) throw new NotFoundException("Review settings not found");
     await this.assertModel(organizationId, settings.model);
     const [pullRequest, context] = await Promise.all([this.azure.getPullRequest(repository, pat, dto.pullRequestId), this.azure.getReviewContext(repository, pat, dto.pullRequestId)]);
+    if (!isTargetBranchAllowed(pullRequest.targetBranch, settings.targetBranches)) throw new BadRequestException("Pull request target branch is not enabled for reviews");
     const jobId = randomUUID(); const eventId = randomUUID(); const attempt = 1;
     const request = this.buildRequest({ jobId, eventId, attempt, correlationId, organizationId, repository, pullRequest, context, settings, pat, authJson });
     this.contracts.assertRequest(request);
@@ -110,7 +112,13 @@ export class ReviewsService {
   async findings(organizationId: string, id: string) { await this.get(organizationId, id); return this.prisma.reviewFinding.findMany({ where: { reviewJobId: id }, orderBy: [{ severity: "desc" }, { ordinal: "asc" }] }); }
   async getSettings(organizationId: string, repositoryId: string) { await this.repositories.get(organizationId, repositoryId); return this.prisma.reviewSetting.findUniqueOrThrow({ where: { repositoryId } }); }
   async getAllowedModels(organizationId: string) { const { allowedModels, defaultModel } = await this.organizations.resolveModelPolicy(organizationId); return { models: allowedModels, defaultModel }; }
-  async updateSettings(organizationId: string, repositoryId: string, dto: UpdateReviewSettingsDto) { await this.repositories.get(organizationId, repositoryId); await this.assertModel(organizationId, dto.model); return this.prisma.reviewSetting.update({ where: { repositoryId }, data: dto }); }
+  async updateSettings(organizationId: string, repositoryId: string, dto: UpdateReviewSettingsDto) {
+    await this.repositories.get(organizationId, repositoryId);
+    await this.assertModel(organizationId, dto.model);
+    const targetBranches = normalizeTargetBranches(dto.targetBranches);
+    if (!targetBranches.length) throw new BadRequestException("At least one target branch is required");
+    return this.prisma.reviewSetting.update({ where: { repositoryId }, data: { ...dto, targetBranches } });
+  }
   loadRetryJob(jobId: string) { return this.prisma.reviewJob.findUnique({ where: { id: jobId }, include: { pullRequest: true, attempts: { orderBy: { attempt: "desc" }, take: 1 }, repository: { include: { settings: true } } } }); }
   findByCorrelationId(correlationId: string) { return this.prisma.reviewJob.findUnique({ where: { correlationId } }); }
 

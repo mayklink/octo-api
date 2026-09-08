@@ -24,7 +24,7 @@ describe("ReviewsService model policy", () => {
     const prisma = { reviewSetting: { update: vi.fn() } };
     const service = buildService({ prisma, repositories, organizations });
 
-    await expect(service.updateSettings("org-1", "repo-1", { model: "not-allowed", prompt: "p", autoReview: true } as any)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.updateSettings("org-1", "repo-1", { model: "not-allowed", prompt: "p", autoReview: true, targetBranches: ["developer"] } as any)).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.reviewSetting.update).not.toHaveBeenCalled();
   });
 
@@ -35,7 +35,8 @@ describe("ReviewsService model policy", () => {
     const prisma = { reviewSetting: { update: vi.fn().mockResolvedValue(updated) } };
     const service = buildService({ prisma, repositories, organizations });
 
-    await expect(service.updateSettings("org-1", "repo-1", { model: "a", prompt: "p", autoReview: true } as any)).resolves.toEqual(updated);
+    await expect(service.updateSettings("org-1", "repo-1", { model: "a", prompt: "p", autoReview: true, targetBranches: ["refs/heads/Developer", "developer"] } as any)).resolves.toEqual(updated);
     expect(organizations.resolveModelPolicy).toHaveBeenCalledWith("org-1");
+    expect(prisma.reviewSetting.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ targetBranches: ["developer"] }) }));
   });
 });

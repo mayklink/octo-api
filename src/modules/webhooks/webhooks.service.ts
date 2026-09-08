@@ -6,6 +6,7 @@ import { CredentialsService } from "../credentials/credentials.service";
 import { RepositoriesService } from "../repositories/repositories.service";
 import { ReviewsService } from "../reviews/reviews.service";
 import { DiscordWebhookService } from "../discord/discord-webhook.service";
+import { isTargetBranchAllowed } from "../reviews/target-branches";
 
 @Injectable()
 export class WebhooksService {
@@ -34,7 +35,7 @@ export class WebhooksService {
         reviewers: event.reviewers,
       });
       const shouldReview = event.type === "git.pullrequest.created" || (event.type === "git.pullrequest.updated" && reviewSourcePush);
-      if (!shouldReview || !repository.settings?.autoReview || !event.pullRequestId) {
+      if (!shouldReview || !repository.settings?.autoReview || !event.pullRequestId || !isTargetBranchAllowed(event.targetBranch, repository.settings.targetBranches)) {
         await this.prisma.webhookEvent.update({ where: { id: stored.id }, data: { processedAt: new Date(), processingAt: null } });
         return { accepted: true, ignored: true };
       }
@@ -67,6 +68,7 @@ function parseAzureEvent(value: unknown) {
     projectName: typeof project?.name === "string" ? project.name : undefined,
     pullRequestId: typeof pr === "number" || typeof pr === "string" ? String(pr) : undefined,
     pullRequestTitle: typeof pullRequest.title === "string" ? pullRequest.title : undefined,
+    targetBranch: typeof pullRequest.targetRefName === "string" ? pullRequest.targetRefName : undefined,
     pullRequestDescription: typeof pullRequest.description === "string" ? pullRequest.description : undefined,
     pullRequestUrl: typeof pullRequest.url === "string" ? pullRequest.url : undefined,
     author: typeof commentAuthor?.displayName === "string" ? commentAuthor.displayName : typeof createdBy?.displayName === "string" ? createdBy.displayName : undefined,

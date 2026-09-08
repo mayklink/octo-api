@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { WebhooksService } from "../src/modules/webhooks/webhooks.service";
 
-const baseRepository = { id: "repo-1", name: "repo-1", organizationId: "org-1", azureRepositoryId: "azure-repo-1", azureProjectId: "azure-project-1", webhookSecretHash: "hash", settings: { autoReview: true } };
+const baseRepository = { id: "repo-1", name: "repo-1", organizationId: "org-1", azureRepositoryId: "azure-repo-1", azureProjectId: "azure-project-1", webhookSecretHash: "hash", settings: { autoReview: true, targetBranches: ["developer"] } };
 
 function buildBody(overrides: Record<string, unknown> = {}) {
   return {
     id: "evt-1",
     eventType: "git.pullrequest.created",
-    resource: { repository: { id: "azure-repo-1", project: { id: "azure-project-1" } }, pullRequestId: 42 },
+    resource: { repository: { id: "azure-repo-1", project: { id: "azure-project-1" } }, pullRequestId: 42, targetRefName: "refs/heads/developer" },
     ...overrides,
   };
 }
@@ -49,7 +49,7 @@ describe("WebhooksService", () => {
 
   it("creates a review job for a new qualifying pull request event", async () => {
     const { service, reviews, prisma, discord } = buildService();
-    const result = await service.azureDevOps("repo-1", "token", buildBody({ resource: { repository: { id: "azure-repo-1", project: { id: "azure-project-1" } }, pullRequestId: 42, reviewers: [{ displayName: "Maroli" }, { displayName: "Ana" }, { displayName: "Maroli" }] } }));
+    const result = await service.azureDevOps("repo-1", "token", buildBody({ resource: { repository: { id: "azure-repo-1", project: { id: "azure-project-1" } }, pullRequestId: 42, targetRefName: "refs/heads/developer", reviewers: [{ displayName: "Maroli" }, { displayName: "Ana" }, { displayName: "Maroli" }] } }));
     expect(reviews.create).toHaveBeenCalledWith("org-1", { repositoryId: "repo-1", pullRequestId: "42" }, expect.any(String), "webhook");
     expect(prisma.webhookEvent.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reviewJobId: "job-1" }) }));
     expect(result).toEqual({ accepted: true, jobId: "job-1" });
@@ -73,6 +73,13 @@ describe("WebhooksService", () => {
   it("does not create a review for an unmarked pull request update", async () => {
     const { service, reviews } = buildService();
     const result = await service.azureDevOps("repo-1", "token", buildBody({ eventType: "git.pullrequest.updated" }));
+    expect(result).toEqual({ accepted: true, ignored: true });
+    expect(reviews.create).not.toHaveBeenCalled();
+  });
+
+  it("ignores a pull request whose target branch is not configured for reviews", async () => {
+    const { service, reviews } = buildService();
+    const result = await service.azureDevOps("repo-1", "token", buildBody({ resource: { repository: { id: "azure-repo-1", project: { id: "azure-project-1" } }, pullRequestId: 42, targetRefName: "refs/heads/main" } }));
     expect(result).toEqual({ accepted: true, ignored: true });
     expect(reviews.create).not.toHaveBeenCalled();
   });
