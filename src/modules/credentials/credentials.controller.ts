@@ -25,6 +25,7 @@ export class CredentialsController {
     if (auth.organizationId !== organizationId) throw new ForbiddenException("Organization context mismatch");
     const { mode, value } = this.credentials.normalizeCodexConfiguration(dto.mode, dto.authJson, dto.apiKey);
     await this.credentials.store(organizationId, null, CredentialKind.codex_auth, value);
+    this.codexUsage.invalidate(organizationId);
     return { connected: true, authenticationMode: mode, validatedAt: new Date().toISOString() };
   }
 

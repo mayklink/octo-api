@@ -86,16 +86,19 @@ export class CredentialsService {
       throw new BadRequestException("Invalid Codex credential refresh envelope", { cause: error as Error });
     } finally { key.fill(0); }
     if (!payload || typeof payload.previousRefreshToken !== "string") throw new BadRequestException("Invalid Codex credential refresh payload");
-    const next = this.validateCodexAuth(payload.authJson);
-    return this.prisma.$transaction(async (tx) => {
-      const current = await tx.integrationCredential.findFirst({ where: { organizationId, repositoryId: null, kind: CredentialKind.codex_auth } });
-      if (!current) return false;
-      const currentValue = this.decryptAtRest(current, organizationId, null).value;
-      if (!isRecord(currentValue) || !isRecord(currentValue.tokens) || currentValue.tokens.refresh_token !== payload.previousRefreshToken) return false;
-      const envelope = this.encryptAtRest({ value: next }, organizationId, null, CredentialKind.codex_auth);
-      await tx.integrationCredential.update({ where: { id: current.id }, data: { ...envelope, version: { increment: 1 }, lastValidatedAt: new Date() } });
-      return true;
-    });
+    return this.persistCodexAuthRefresh(organizationId, payload.previousRefreshToken, payload.authJson);
+  }
+
+  async persistCodexAuthRefresh(organizationId: string, previousRefreshToken: string, authJson: unknown): Promise<boolean> {
+    const next = this.validateCodexAuth(authJson);
+    if (codexAuthenticationMode(next) !== "chatgpt" || !isRecord(next.tokens)) throw new BadRequestException("Expected ChatGPT credential refresh");
+    const current = await this.prisma.integrationCredential.findFirst({ where: { organizationId, repositoryId: null, kind: CredentialKind.codex_auth } });
+    if (!current) return false;
+    const currentValue = this.decryptAtRest(current, organizationId, null).value;
+    if (!isRecord(currentValue) || !isRecord(currentValue.tokens) || currentValue.tokens.refresh_token !== previousRefreshToken || currentValue.tokens.account_id !== next.tokens.account_id) return false;
+    const envelope = this.encryptAtRest({ value: next }, organizationId, null, CredentialKind.codex_auth);
+    const updated = await this.prisma.integrationCredential.updateMany({ where: { id: current.id, version: current.version }, data: { ...envelope, version: { increment: 1 }, lastValidatedAt: new Date() } });
+    return updated.count === 1;
   }
 
   createWorkerEnvelope(request: Pick<ReviewRequestedV2, "eventId" | "jobId" | "organizationId" | "repositoryId" | "provider" | "clone" | "engine">, purpose: "source-control" | "engine", plaintext: unknown): EncryptedCredential {

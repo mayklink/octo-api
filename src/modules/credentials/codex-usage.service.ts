@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { CredentialKind } from "@prisma/client";
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { codexAuthenticationMode, type CodexAuthenticationMode, CredentialsService } from "./credentials.service";
@@ -35,12 +35,22 @@ type RateLimitWindow = { usedPercent?: unknown; windowDurationMins?: unknown; re
 @Injectable()
 export class CodexUsageService {
   private readonly cache = new Map<string, { expiresAt: number; value: CodexStatus }>();
+  private readonly inFlight = new Map<string, Promise<CodexStatus>>();
 
   constructor(private readonly config: ConfigService, private readonly credentials: CredentialsService) {}
 
   invalidate(organizationId: string): void { this.cache.delete(organizationId); }
 
   async getStatus(organizationId: string, refresh = false): Promise<CodexStatus> {
+    const pending = this.inFlight.get(organizationId);
+    if (pending) return pending;
+    const operation = this.queryStatus(organizationId, refresh);
+    this.inFlight.set(organizationId, operation);
+    try { return await operation; }
+    finally { this.inFlight.delete(organizationId); }
+  }
+
+  private async queryStatus(organizationId: string, refresh: boolean): Promise<CodexStatus> {
     const cached = this.cache.get(organizationId);
     if (!refresh && cached && cached.expiresAt > Date.now()) return cached.value;
 
@@ -81,7 +91,7 @@ export class CodexUsageService {
     }
 
     try {
-      const snapshot = await this.readSnapshot(authJson);
+      const snapshot = await this.readSnapshot(organizationId, authJson);
       const windows = normalizeWindows(snapshot.rateLimits);
       if (!windows.length) {
         return this.remember(organizationId, {
@@ -113,16 +123,24 @@ export class CodexUsageService {
     return value;
   }
 
-  private async readSnapshot(authJson: unknown): Promise<{ planType: string | null; rateLimits: unknown }> {
+  private async readSnapshot(organizationId: string, authJson: unknown): Promise<{ planType: string | null; rateLimits: unknown }> {
     const directory = await mkdtemp(join(tmpdir(), "octob-codex-status-"));
     await chmod(directory, 0o700);
     try {
       await writeFile(join(directory, "auth.json"), JSON.stringify(authJson), { mode: 0o600 });
-      return await runAppServer(
-        resolveBinary(this.config.get<string>("codex.binary", "node_modules/.bin/codex")),
-        directory,
-        this.config.get<number>("codex.statusTimeoutMs", 10_000),
-      );
+      try {
+        return await runAppServer(
+          resolveBinary(this.config.get<string>("codex.binary", "node_modules/.bin/codex")),
+          directory,
+          this.config.get<number>("codex.statusTimeoutMs", 10_000),
+        );
+      } finally {
+        const updated = JSON.parse(await readFile(join(directory, "auth.json"), "utf8")) as unknown;
+        const previousToken = asRecord(asRecord(authJson)?.tokens)?.refresh_token;
+        if (JSON.stringify(updated) !== JSON.stringify(authJson) && typeof previousToken === "string") {
+          await this.credentials.persistCodexAuthRefresh(organizationId, previousToken, updated);
+        }
+      }
     } finally {
       await rm(directory, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -162,6 +180,7 @@ function runAppServer(binary: string, home: string, timeoutMs: number): Promise<
     let settled = false;
     let accountRequestsSent = false;
     const responses = new Map<number, JsonRpcResponse>();
+    const closed = new Promise<void>((done) => child.once("close", () => done()));
     const timer = setTimeout(() => finish(new Error("Codex status query timed out")), timeoutMs);
 
     const finish = (error?: Error) => {
@@ -169,12 +188,12 @@ function runAppServer(binary: string, home: string, timeoutMs: number): Promise<
       settled = true;
       clearTimeout(timer);
       child.kill("SIGKILL");
-      if (error) reject(error);
-      else {
+      void closed.then(() => {
+        if (error) { reject(error); return; }
         const account = asRecord(responses.get(2)?.result);
         const accountValue = asRecord(account?.account);
         resolve({ planType: stringOrNull(accountValue?.planType), rateLimits: responses.get(3)?.result });
-      }
+      });
     };
 
     child.once("error", (error) => finish(error));
