@@ -27,3 +27,6 @@ Sem novas dependências ou alterações destrutivas de banco.
 
 ## Validação
 Executar lint, typecheck, build e testes; verificar implantação pelo MCP Hostinger. Registrar limitações conhecidas dos testes de subprocesso no Windows.
+
+## Execução em produção
+O primeiro deploy encontrou P3009: organization_access_management estava marcada como falha desde 2 de setembro porque InviteStatus já existia. O comando de inicialização anterior foi restaurado temporariamente. Após comparar tipos, colunas, defaults, índices e constraints com o SQL, foram registradas como aplicadas organization_access_management e organization_model_policy, cujas estruturas já existiam. Prisma migrate deploy aplicou discord_webhook_credential e review_target_branches com sucesso. O comando start com migrations foi então restabelecido para próximos deploys.
