@@ -1,8 +1,9 @@
 import { ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { CredentialKind, Prisma } from "@prisma/client";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 import { createHash } from "node:crypto";
 import { CredentialsService } from "../credentials/credentials.service";
+import { AzureDevOpsAdapter } from "../azure-devops/azure-devops.adapter";
 import { RepositoriesService } from "../repositories/repositories.service";
 import { ReviewsService } from "../reviews/reviews.service";
 import { DiscordWebhookService } from "../discord/discord-webhook.service";
@@ -10,7 +11,7 @@ import { isTargetBranchAllowed } from "../reviews/target-branches";
 
 @Injectable()
 export class WebhooksService {
-  constructor(private readonly prisma: PrismaService, private readonly credentials: CredentialsService, private readonly repositories: RepositoriesService, private readonly reviews: ReviewsService, private readonly discord: DiscordWebhookService) {}
+  constructor(private readonly prisma: PrismaService, private readonly credentials: CredentialsService, private readonly repositories: RepositoriesService, private readonly reviews: ReviewsService, private readonly discord: DiscordWebhookService, private readonly azure: AzureDevOpsAdapter) {}
   async azureDevOps(repositoryId: string, token: string, body: unknown, reviewSourcePush = false) {
     const repository = await this.repositories.findByIdWithSettings(repositoryId);
     if (!repository) throw new NotFoundException("Webhook repository not found");
@@ -39,6 +40,10 @@ export class WebhooksService {
         await this.prisma.webhookEvent.update({ where: { id: stored.id }, data: { processedAt: new Date(), processingAt: null } });
         return { accepted: true, ignored: true };
       }
+      if (!await this.hasCodeChanges(repository, event.pullRequestId)) {
+        await this.prisma.webhookEvent.update({ where: { id: stored.id }, data: { processedAt: new Date(), processingAt: null } });
+        return { accepted: true, ignored: true };
+      }
       const correlationId = event.correlationId?.slice(0, 128) || `wh-${createHash("sha256").update(`${repositoryId}:${event.id}`).digest("hex")}`;
       const existingJob = await this.reviews.findByCorrelationId(correlationId);
       const job = existingJob ?? await this.reviews.create(repository.organizationId, { repositoryId, pullRequestId: event.pullRequestId }, correlationId, "webhook");
@@ -48,6 +53,17 @@ export class WebhooksService {
       await this.prisma.webhookEvent.update({ where: { id: stored.id }, data: { processingAt: null } }).catch(() => undefined);
       throw error;
     }
+  }
+
+  private async hasCodeChanges(repository: { id: string; organizationId: string; azureOrganization: string; azureProjectId: string; azureRepositoryId: string; cloneUrl: string }, pullRequestId: string): Promise<boolean> {
+    const [pat, previous] = await Promise.all([
+      this.credentials.load(repository.organizationId, repository.id, CredentialKind.azure_devops_pat) as Promise<string>,
+      this.prisma.pullRequest.findUnique({ where: { repositoryId_providerPullRequestId: { repositoryId: repository.id, providerPullRequestId: pullRequestId } }, select: { sourceCommit: true } }),
+    ]);
+    const current = await this.azure.getPullRequest(repository, pat, pullRequestId);
+    // A PR newly created must contain a diff. Subsequent reviews require a new
+    // source commit; metadata-only Azure DevOps events keep this SHA unchanged.
+    return previous ? previous.sourceCommit !== current.sourceCommit : current.sourceCommit !== current.targetCommit;
   }
 }
 

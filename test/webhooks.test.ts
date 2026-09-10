@@ -14,6 +14,7 @@ function buildBody(overrides: Record<string, unknown> = {}) {
 
 function buildService(options: { repository?: unknown; tokenMatches?: boolean; storedEvent?: any } = {}) {
   const prisma = {
+    pullRequest: { findUnique: vi.fn().mockResolvedValue(null) },
     webhookEvent: {
       findUnique: vi.fn().mockResolvedValue(options.storedEvent ?? null),
       create: vi.fn().mockImplementation(({ data }) => ({ id: "stored-1", processedAt: null, ...data })),
@@ -21,12 +22,13 @@ function buildService(options: { repository?: unknown; tokenMatches?: boolean; s
       update: vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: "stored-1", ...data })),
     },
   };
-  const credentials = { matchesWebhookSecret: vi.fn().mockReturnValue(options.tokenMatches ?? true) };
+  const credentials = { matchesWebhookSecret: vi.fn().mockReturnValue(options.tokenMatches ?? true), load: vi.fn().mockResolvedValue("pat") };
   const repositories = { findByIdWithSettings: vi.fn().mockResolvedValue(options.repository === undefined ? baseRepository : options.repository) };
   const reviews = { create: vi.fn().mockResolvedValue({ id: "job-1" }), findByCorrelationId: vi.fn().mockResolvedValue(null) };
   const discord = { publishAzureDevOpsEvent: vi.fn().mockResolvedValue(false) };
-  const service = new WebhooksService(prisma as any, credentials as any, repositories as any, reviews as any, discord as any);
-  return { service, prisma, credentials, repositories, reviews, discord };
+  const azure = { getPullRequest: vi.fn().mockResolvedValue({ sourceCommit: "a".repeat(40), targetCommit: "b".repeat(40) }) };
+  const service = new WebhooksService(prisma as any, credentials as any, repositories as any, reviews as any, discord as any, azure as any);
+  return { service, prisma, credentials, repositories, reviews, discord, azure };
 }
 
 describe("WebhooksService", () => {
@@ -85,9 +87,26 @@ describe("WebhooksService", () => {
   });
 
   it("creates a review for a source-branch pull request update", async () => {
-    const { service, reviews } = buildService();
+    const { service, reviews, prisma } = buildService();
+    prisma.pullRequest.findUnique.mockResolvedValue({ sourceCommit: "c".repeat(40) });
     await service.azureDevOps("repo-1", "token", buildBody({ eventType: "git.pullrequest.updated" }), true);
     expect(reviews.create).toHaveBeenCalledOnce();
+  });
+
+  it("does not create a review for a source update without a new source commit", async () => {
+    const { service, reviews, prisma } = buildService();
+    prisma.pullRequest.findUnique.mockResolvedValue({ sourceCommit: "a".repeat(40) });
+    const result = await service.azureDevOps("repo-1", "token", buildBody({ eventType: "git.pullrequest.updated" }), true);
+    expect(result).toEqual({ accepted: true, ignored: true });
+    expect(reviews.create).not.toHaveBeenCalled();
+  });
+
+  it("does not create a review for a newly created pull request without a diff", async () => {
+    const { service, reviews, azure } = buildService();
+    azure.getPullRequest.mockResolvedValue({ sourceCommit: "a".repeat(40), targetCommit: "a".repeat(40) });
+    const result = await service.azureDevOps("repo-1", "token", buildBody());
+    expect(result).toEqual({ accepted: true, ignored: true });
+    expect(reviews.create).not.toHaveBeenCalled();
   });
 
   it("accepts non-pull-request Azure events so they can be forwarded to Discord", async () => {
